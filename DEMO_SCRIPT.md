@@ -2,7 +2,7 @@
 
 ## Goal
 
-Show that Hermes can buy an x402-protected resource on Algorand from Telegram, while Firefly remains mandatory for policy approval and exact payment approval.
+Show that Hermes can buy an official GoPlausible x402-protected API on Algorand from Telegram, while Firefly remains mandatory for policy approval and exact payment approval.
 
 ## Before The Pitch
 
@@ -38,8 +38,8 @@ Use Sign402 Gateway:
 https://<gateway-tunnel>.trycloudflare.com
 
 For policy approval, call POST /approve-policy.
-For buying the probe, call POST /agent/buy-probe with {"target":"algorand.co"}.
-Do not use a separate resource URL.
+For buying GoPlausible weather, call POST /agent/buy-x402 with {"url":"https://x402.goplausible.xyz/examples/weather"}.
+Do not build the x402 payment yourself. Do not ask for private keys. Only call the Sign402 Gateway.
 ```
 
 ## Stage Flow
@@ -60,6 +60,21 @@ In Telegram:
 approve sign402 policy
 ```
 
+Use the official USDC policy:
+
+```json
+{
+  "version": "1",
+  "agentId": "hermes-demo",
+  "policyId": "policy-goplausible-usdc-demo",
+  "allowedPurpose": "x402_api_access",
+  "asset": "10458941",
+  "maxBudgetAtomic": "100000",
+  "maxPerPaymentAtomic": "10000",
+  "nonce": "goplausible-weather-demo"
+}
+```
+
 Expected:
 
 - Firefly shows the policy hash.
@@ -72,19 +87,20 @@ Expected:
 In Telegram:
 
 ```text
-buy x402 probe for algorand.co
+buy goplausible weather
 ```
 
 Expected:
 
-- Gateway requests `/probe?target=algorand.co`.
-- Resource returns `402 Payment Required`.
+- Gateway requests `https://x402.goplausible.xyz/examples/weather`.
+- GoPlausible returns `402 Payment Required`.
 - Gateway checks the stored policy.
-- Firefly shows the payment approval hash.
+- Firefly shows `x402 WEATHER`, `0.01 USDC`, `GoPlausible API`, and the short payment approval hash.
 - User presses approve.
-- Gateway sends Algorand TestNet payment.
-- Resource accepts `X-Payment`.
-- Hermes replies with decision, tx id, policy hash, payment hash, result, and remaining budget.
+- Gateway creates official `x402-avm` `PAYMENT-SIGNATURE`.
+- GoPlausible facilitator settles the Algorand TestNet USDC payment.
+- GoPlausible returns protected weather JSON.
+- Hermes replies with decision, tx id, policy hash, payment hash, weather result, and remaining budget.
 - Dashboard updates automatically.
 
 ### 4. Point To The Audit Trail
@@ -95,12 +111,13 @@ Show:
 - Firefly hash on device;
 - dashboard payment approval hash;
 - Algorand tx id;
-- transaction note: `sign402:<policyHash>:<paymentIntent>`.
+- official GoPlausible `Payment-Response`;
+- protected weather JSON.
 
 Say:
 
 ```text
-The agent did not get the private key. It could only trigger a payment after the gateway checked the policy and Firefly approved the exact payment hash.
+The agent did not get the private key. It could only trigger a payment after the gateway checked the USDC policy and Firefly approved the exact payment hash. The final API response came from a real GoPlausible x402 resource.
 ```
 
 ## Failure Demo
@@ -108,8 +125,8 @@ The agent did not get the private key. It could only trigger a payment after the
 Optional if time allows:
 
 - Disconnect Firefly or press cancel.
-- Run `buy x402 probe for algorand.co` again.
-- Expected result: payment rejected, no Algorand transaction.
+- Run `buy goplausible weather` again.
+- Expected result: payment rejected, no Algorand transaction and no protected API response.
 
 Say:
 

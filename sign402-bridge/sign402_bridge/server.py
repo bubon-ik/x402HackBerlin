@@ -83,7 +83,14 @@ class Sign402Handler(BaseHTTPRequestHandler):
         try:
             payload = self._read_json()
             payment_hash = str(payload["paymentHash"]).lower()
-            approval = self.server.firefly.approve_payment_hash(payment_hash)
+            payment_context = payload.get("paymentContext")
+            if isinstance(payment_context, list):
+                approval = self.server.firefly.approve_payment_hash(
+                    payment_hash,
+                    context_lines=payment_context,
+                )
+            else:
+                approval = self.server.firefly.approve_payment_hash(payment_hash)
 
             if approval.get("approved") and approval["approvedHash"] != payment_hash:
                 raise ValueError("Firefly approved hash does not match payment hash.")

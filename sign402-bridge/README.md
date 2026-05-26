@@ -4,7 +4,7 @@ Local HTTP bridge between server-side Hermes and a Firefly device connected to t
 
 Hermes sends a policy JSON to the bridge. The bridge canonicalizes it, computes a SHA-256 hash, sends the hash to Firefly with `POLICY=<64 hex chars>`, and returns the Firefly approval event.
 
-For strict mode, Hermes can also send a payment commitment hash to `POST /approve-payment`. The bridge sends `PAYMENT=<64 hex chars>` to Firefly. Firefly shows the payment hash and waits for a physical approve/cancel button press.
+For strict mode, Hermes can also send a payment commitment hash to `POST /approve-payment`. The bridge can first send `PAYMENT-CONTEXT=<line1>|<line2>|<line3>` and then sends `PAYMENT=<64 hex chars>` to Firefly. Firefly shows the human payment summary, the short payment hash, and waits for a physical approve/cancel button press.
 
 ## Run
 
@@ -74,6 +74,11 @@ curl -X POST http://127.0.0.1:8088/approve-payment \
   -H "Content-Type: application/json" \
   -d '{
     "paymentHash": "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff",
+    "paymentContext": [
+      "x402 WEATHER",
+      "0.01 USDC",
+      "GoPlausible API"
+    ],
     "paymentCommitment": {
       "type": "sign402-payment",
       "policyHash": "...",
@@ -90,6 +95,7 @@ curl -X POST http://127.0.0.1:8088/approve-payment \
 
 On Firefly:
 
+- screen shows the payment summary, then short hash, then `OK / CANCEL`;
 - approve button returns `approved: true`;
 - cancel button returns `approved: false`;
 - timeout returns `approved: false`.

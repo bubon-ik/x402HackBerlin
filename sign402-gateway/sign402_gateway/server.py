@@ -133,7 +133,14 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
         try:
             payload = self._read_json()
             payment_hash = _read_hash(payload, "paymentHash")
-            approval = self.server.firefly.approve_payment_hash(payment_hash)
+            payment_commitment = payload.get("paymentCommitment")
+            context_lines = _payment_context_lines(
+                payment_commitment if isinstance(payment_commitment, dict) else None
+            )
+            approval = self.server.firefly.approve_payment_hash(
+                payment_hash,
+                context_lines=context_lines,
+            )
 
             if approval.get("approved") and approval["approvedHash"] != payment_hash:
                 raise ValueError("Firefly approved hash does not match payment hash.")
@@ -480,7 +487,10 @@ class AgentBuyProbeRunner:
 
         payment_commitment = build_payment_commitment(requirement, policy_hash)
         payment_hash = payment_commitment["paymentHash"]
-        approval = self.firefly.approve_payment_hash(payment_hash)
+        approval = self.firefly.approve_payment_hash(
+            payment_hash,
+            context_lines=_payment_context_lines(requirement),
+        )
         if not approval.get("approved"):
             event = {
                 "decision": "rejected_by_firefly",
@@ -605,7 +615,10 @@ class ExternalX402Buyer:
 
         payment_commitment = build_payment_commitment(requirement, policy_hash)
         payment_hash = payment_commitment["paymentHash"]
-        approval = self.firefly.approve_payment_hash(payment_hash)
+        approval = self.firefly.approve_payment_hash(
+            payment_hash,
+            context_lines=_payment_context_lines(requirement),
+        )
         if not approval.get("approved"):
             event = {
                 "decision": "rejected_by_firefly",
@@ -802,6 +815,51 @@ def _read_hash(payload: dict[str, Any], key: str) -> str:
     if not HEX_32_RE.fullmatch(value):
         raise ValueError(f"{key} must be 64 hex characters")
     return value
+
+
+def _payment_context_lines(requirement: dict[str, Any] | None) -> list[str]:
+    if not requirement or "amountAtomic" not in requirement:
+        return ["x402 PAYMENT", "sign402 approval"]
+
+    resource = str(requirement.get("resource", ""))
+    title = "x402 WEATHER" if "weather" in resource.lower() else "x402 PAYMENT"
+    service = "GoPlausible API" if "goplausible" in resource.lower() else "x402 API"
+    return [
+        title,
+        _format_display_amount(requirement),
+        service,
+    ]
+
+
+def _format_display_amount(requirement: dict[str, Any]) -> str:
+    amount_atomic = int(str(requirement.get("amountAtomic", "0")))
+    asset = str(requirement.get("asset", ""))
+    extra = requirement.get("extra")
+    asset_name = ""
+    decimals = 0
+    if isinstance(extra, dict):
+        asset_name = str(extra.get("name", ""))
+        decimals = int(str(extra.get("decimals", "0")))
+
+    if asset == "10458941" and not asset_name:
+        asset_name = "USDC"
+        decimals = 6
+    elif asset == "ALGO_TEST":
+        asset_name = "ALGO"
+        decimals = 6
+    elif not asset_name:
+        asset_name = asset
+
+    if decimals <= 0:
+        return f"{amount_atomic} {asset_name}"
+
+    divisor = 10**decimals
+    whole = amount_atomic // divisor
+    fraction = amount_atomic % divisor
+    fraction_text = str(fraction).zfill(decimals).rstrip("0")
+    if not fraction_text:
+        return f"{whole} {asset_name}"
+    return f"{whole}.{fraction_text} {asset_name}"
 
 
 def _validate_payment_requirements(requirement: Any) -> None:

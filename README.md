@@ -2,7 +2,7 @@
 
 Hardware-approved x402 payments for an AI agent on Algorand.
 
-Hermes can buy an x402-protected resource from Telegram, but every live payment must pass through a Firefly hardware approval step. The agent never receives the Algorand private key. The local Sign402 Gateway owns payment execution, checks the Firefly-approved policy, asks Firefly to approve the exact payment hash, sends the Algorand TestNet transaction, and updates the demo dashboard.
+Hermes can buy an official GoPlausible x402-protected API from Telegram, but every live payment must pass through a Firefly hardware approval step. The agent never receives the Algorand private key. The local Sign402 Gateway owns payment execution, checks the Firefly-approved policy, asks Firefly to approve the exact payment hash with a human-readable payment screen, sends the Algorand TestNet USDC transaction through `x402-avm`, and updates the demo dashboard.
 
 ## Main Demo Flow
 
@@ -87,30 +87,46 @@ POST <gateway-url>/approve-policy
 
 The gateway sends the policy hash to Firefly using `PAYMENT=<policyHash>`. The user approves on Firefly. The approved policy is stored locally by the gateway.
 
-Then buy the protected resource:
+Then buy the official GoPlausible protected resource:
 
 ```text
-buy x402 probe for algorand.co
+buy goplausible weather
 ```
 
 Hermes should call:
 
 ```text
-POST <gateway-url>/agent/buy-probe
+POST <gateway-url>/agent/buy-x402
 Content-Type: application/json
 
-{"target":"algorand.co"}
+{"url":"https://x402.goplausible.xyz/examples/weather"}
 ```
 
 The gateway performs the full flow:
 
 ```text
-request resource -> receive 402 -> check policy -> Firefly payment approval -> Algorand TestNet payment -> retry with X-Payment -> dashboard event
+request GoPlausible weather API -> receive 402 -> check USDC policy -> Firefly payment approval -> x402-avm PAYMENT-SIGNATURE -> GoPlausible facilitator settlement -> protected weather JSON -> dashboard event
 ```
 
-## GoPlausible x402 Compatibility Lane
+On payment approval, Firefly receives a `PAYMENT-CONTEXT` pre-command before the hash. For the GoPlausible weather demo the device shows:
 
-The main demo remains the stable Firefly-approved TestNet flow above. A separate compatibility endpoint is now available for official GoPlausible/x402-v2 resources:
+```text
+x402 WEATHER
+0.01 USDC
+GoPlausible API
+Hash ....<last4>
+OK / CANCEL
+```
+
+## Official GoPlausible x402 Path
+
+The main hackathon demo uses the official GoPlausible/x402-v2 weather endpoint:
+
+```text
+https://x402.goplausible.xyz/examples/weather
+```
+
+For protocol inspection without payment:
 
 ```text
 POST <gateway-url>/agent/inspect-x402
@@ -129,7 +145,7 @@ Current status:
 - implemented: gateway endpoint `POST /agent/buy-x402` for Firefly-approved official GoPlausible purchases;
 - tested through Hermes Telegram: GoPlausible weather API returned `200 OK` with transaction `BTVGJ3MN42KKFBUN6BV3QRDZZDO54H2OCDX5LKHRU3PFASFYW72A`.
 
-For official GoPlausible payments, approve a policy whose `asset` is `10458941` and whose budget fields are in USDC atomic units. Then call:
+For official GoPlausible payments, approve a policy whose `asset` is `10458941` and whose budget fields are in USDC atomic units. Then Hermes calls:
 
 ```text
 POST <gateway-url>/agent/buy-x402

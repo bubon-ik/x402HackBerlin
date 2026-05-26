@@ -96,7 +96,7 @@
 
 - [ ] Move Algorand signing key into Firefly.
 - [ ] Sign Algorand transactions on Firefly.
-- [ ] Show human-readable payment summary on Firefly.
+- [x] Show human-readable payment summary on Firefly.
 - [ ] Add durable replay protection.
 - [ ] Add production-grade gateway auth.
 - [ ] Add mainnet mode.
@@ -172,7 +172,7 @@ Hermes Sign402 is a Telegram AI agent that can pay for x402 resources on Algoran
 ### Hardware
 
 - Firefly connects over USB serial.
-- Firefly displays hashes on screen.
+- Firefly displays human payment context plus the short approval hash on screen.
 - Firefly approve/cancel buttons work.
 - Current button mapping:
   - `GPIO10`: approve
@@ -193,26 +193,30 @@ Hermes Sign402 is a Telegram AI agent that can pay for x402 resources on Algoran
 - Hermes should not receive private keys.
 - Firefly must approve policy creation.
 - Firefly can approve/reject individual payment commitments.
+- Firefly shows the exact payment context before approval, e.g. `x402 WEATHER`, `0.01 USDC`, `GoPlausible API`, and the short hash.
 - If Firefly rejects, times out, disconnects, or hash mismatches, payment must not be sent.
 - Algorand transaction note links payment to `policyHash` and `paymentIntent`.
 
 ## Current Demo Shape
 
-The current prototype now has a one-command local launcher. With `/agent/buy-probe`, server-side Hermes only needs the gateway tunnel:
+The current pitch demo uses the official GoPlausible weather x402 path. Server-side Hermes only needs the gateway tunnel:
 
 1. Local demo launcher for resource server, Sign402 Gateway, and dashboard.
 2. Tunnel to Sign402 Gateway.
+3. Policy approval for USDC TestNet ASA `10458941`.
+4. Telegram command `buy goplausible weather`.
+5. Gateway endpoint `POST /agent/buy-x402`.
 
-The resource server remains local and is called by the gateway. A separate resource tunnel is optional for low-level protocol debugging.
+The local demo resource server remains available for regression and backup demos, but it is no longer the main pitch path.
 
 ## Next Step
 
-Rehearse the **hackathon demo script**.
+Rehearse the **official GoPlausible hackathon demo script**.
 
 The gateway now writes `GET/POST /events/latest`, and the dashboard polls it. The main demo path is:
 
 ```text
-Telegram command -> gateway /agent/buy-probe -> 402 -> policy check -> Firefly payment approval -> Algorand tx -> X-Payment retry -> gateway event -> dashboard updates
+Telegram command -> gateway /agent/buy-x402 -> GoPlausible 402 -> USDC policy check -> Firefly payment approval -> x402-avm PAYMENT-SIGNATURE -> GoPlausible facilitator settlement -> protected weather JSON -> gateway event -> dashboard updates
 ```
 
 ## Sign402 Gateway
@@ -374,7 +378,7 @@ Goal: turn Firefly from consent device into true signing device.
 Tasks:
 
 - [ ] Store Algorand signing key on Firefly.
-- [ ] Show human-readable payment summary on Firefly.
+- [x] Show human-readable payment summary on Firefly.
 - [ ] Sign Algorand transactions on Firefly.
 - [ ] Broadcast signed transactions from host.
 - [ ] Remove private key from Mac executor.

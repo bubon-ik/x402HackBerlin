@@ -77,7 +77,10 @@ class GatewayServerTests(unittest.TestCase):
 
         self.assertIn("HTTP/1.0 200 OK", response)
         self.assertIn('"approved": true', response)
-        DummyServer.firefly.approve_payment_hash.assert_called_once_with(payment_hash)
+        DummyServer.firefly.approve_payment_hash.assert_called_once_with(
+            payment_hash,
+            context_lines=["x402 PAYMENT", "sign402 approval"],
+        )
         DummyServer.payment_executor.assert_not_called()
 
     def test_approve_policy_stores_policy_for_agent_endpoint(self):
@@ -296,6 +299,76 @@ class GatewayServerTests(unittest.TestCase):
         self.assertIn('"decision": "approved_and_executed"', response)
         DummyServer.x402_buyer.assert_called_once_with(
             "https://x402.goplausible.xyz/examples/weather"
+        )
+
+    def test_external_x402_buyer_sends_human_payment_context_to_firefly(self):
+        from sign402_gateway.server import ExternalX402Buyer
+
+        policy_hash = "a" * 64
+        policy = {
+            "asset": "10458941",
+            "allowedPurpose": "x402_api_access",
+            "maxBudgetAtomic": "100000",
+            "maxPerPaymentAtomic": "10000",
+        }
+        requirement = {
+            "network": "algorand-testnet",
+            "x402Network": "algorand:testnet",
+            "asset": "10458941",
+            "amountAtomic": "10000",
+            "receiver": "PAYEE",
+            "resource": "https://x402.goplausible.xyz/examples/weather",
+            "paymentIntent": "intent-001",
+            "purpose": "x402_api_access",
+            "extra": {"name": "USDC", "decimals": 6},
+        }
+
+        firefly = Mock()
+        event_store = Mock()
+        agent_state_store = Mock()
+        agent_state_store.read_policy.return_value = {
+            "policy": policy,
+            "policyHash": policy_hash,
+            "firefly": {"approvedHash": policy_hash},
+        }
+        agent_state_store.remaining_budget.return_value = 90000
+        payment_signature_builder = Mock(return_value={"headerValue": "PAYMENT-SIGNATURE token"})
+
+        def approve_payment_hash(payment_hash, context_lines=None):
+            return {
+                "approved": True,
+                "approvedHash": payment_hash,
+                "deviceModel": 262,
+                "deviceSerial": 1056,
+            }
+
+        firefly.approve_payment_hash.side_effect = approve_payment_hash
+
+        buyer = ExternalX402Buyer(
+            firefly=firefly,
+            payment_signature_builder=payment_signature_builder,
+            event_store=event_store,
+            agent_state_store=agent_state_store,
+        )
+
+        with (
+            patch("sign402_gateway.server.fetch_x402_payment_required", return_value={"accepts": []}),
+            patch("sign402_gateway.server.normalize_x402_payment_required", return_value=requirement),
+            patch(
+                "sign402_gateway.server.fetch_x402_paid_resource",
+                return_value={
+                    "status": 200,
+                    "paymentResponse": {"transaction": "TXID"},
+                },
+            ),
+        ):
+            result = buyer("https://x402.goplausible.xyz/examples/weather")
+
+        self.assertEqual(result["decision"], "approved_and_executed")
+        firefly.approve_payment_hash.assert_called_once()
+        self.assertEqual(
+            firefly.approve_payment_hash.call_args.kwargs["context_lines"],
+            ["x402 WEATHER", "0.01 USDC", "GoPlausible API"],
         )
 
 

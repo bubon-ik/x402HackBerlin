@@ -12,6 +12,16 @@ Hermes gets one public tunnel URL and never receives private keys.
 
 Implementation note: `/approve-policy` uses the Firefly `PAYMENT=<policyHash>` approval path. The older `POLICY=<policyHash>` firmware command can leave the device silent after approval on the current test unit, while `PAYMENT=<hash>` returns to the approval flow reliably.
 
+Payment approval uses the Firefly `PAYMENT-CONTEXT=<line1>|<line2>|<line3>` pre-command when context is available. The current GoPlausible demo shows:
+
+```text
+x402 WEATHER
+0.01 USDC
+GoPlausible API
+Hash ....a1ef
+OK / CANCEL
+```
+
 ## Endpoints
 
 ```text

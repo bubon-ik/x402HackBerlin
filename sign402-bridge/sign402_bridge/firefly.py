@@ -9,6 +9,8 @@ PAYMENT_APPROVED_RE = re.compile(r"<payment\.approved=buffer:([0-9a-fA-F]{64}) \
 PAYMENT_REJECTED_RE = re.compile(r"<payment\.(?:rejected|timeout)=buffer:([0-9a-fA-F]{64}) \(32 bytes\)")
 MODEL_RE = re.compile(r"<device\.model=number:(\d+)")
 SERIAL_RE = re.compile(r"<device\.serial=number:(\d+)")
+PAYMENT_CONTEXT_MAX_LINES = 3
+PAYMENT_CONTEXT_MAX_CHARS = 31
 
 
 def find_firefly_port() -> str:
@@ -81,6 +83,27 @@ def parse_payment_approval(raw: str) -> dict[str, object]:
     raise ValueError(f"Firefly response did not contain payment approval. Raw response: {raw!r}")
 
 
+def format_payment_context_command(context_lines: list[str] | tuple[str, ...] | None) -> str | None:
+    if not context_lines:
+        return None
+
+    lines: list[str] = []
+    for value in context_lines[:PAYMENT_CONTEXT_MAX_LINES]:
+        text = re.sub(r"\s+", " ", str(value))
+        text = "".join(
+            character if 32 <= ord(character) <= 126 and character != "|" else " "
+            for character in text
+        )
+        text = re.sub(r"\s+", " ", text).strip()
+        if text:
+            lines.append(text[:PAYMENT_CONTEXT_MAX_CHARS])
+
+    if not lines:
+        return None
+
+    return "PAYMENT-CONTEXT=" + "|".join(lines)
+
+
 @dataclass
 class FireflyClient:
     port: str
@@ -97,14 +120,32 @@ class FireflyClient:
         raw = self._send_command(f"POLICY={policy_hash.lower()}", self.read_seconds)
         return parse_policy_approval(raw)
 
-    def approve_payment_hash(self, payment_hash: str) -> dict[str, object]:
+    def approve_payment_hash(
+        self,
+        payment_hash: str,
+        *,
+        context_lines: list[str] | tuple[str, ...] | None = None,
+    ) -> dict[str, object]:
         if not re.fullmatch(r"[0-9a-fA-F]{64}", payment_hash):
             raise ValueError("payment_hash must be 64 hex characters.")
 
-        raw = self._send_command(f"PAYMENT={payment_hash.lower()}", self.payment_read_seconds)
+        payment_command = f"PAYMENT={payment_hash.lower()}"
+        context_command = format_payment_context_command(context_lines)
+        if context_command:
+            raw = self._send_command_sequence(
+                [
+                    (context_command, self.read_seconds),
+                    (payment_command, self.payment_read_seconds),
+                ]
+            )
+        else:
+            raw = self._send_command(payment_command, self.payment_read_seconds)
         return parse_payment_approval(raw)
 
     def _send_command(self, command: str, read_seconds: float) -> str:
+        return self._send_command_sequence([(command, read_seconds)])
+
+    def _send_command_sequence(self, commands: list[tuple[str, float]]) -> str:
         try:
             import serial
         except ImportError as exc:
@@ -117,9 +158,13 @@ class FireflyClient:
             write_timeout=2,
         ) as serial_port:
             boot_raw = self._read_until_ready(serial_port, self.settle_seconds)
-            serial_port.write(f"{command}\n".encode("ascii"))
-            time.sleep(0.1)
-            raw = self._read_until_ok(serial_port, read_seconds)
+            raw = ""
+            for index, (command, read_seconds) in enumerate(commands):
+                serial_port.write(f"{command}\n".encode("ascii"))
+                time.sleep(0.1)
+                raw = self._read_until_ok(serial_port, read_seconds)
+                if "<ERROR" in raw and index == len(commands) - 1:
+                    break
 
         if not raw:
             raw = f"[boot/readiness before command: {boot_raw!r}]"

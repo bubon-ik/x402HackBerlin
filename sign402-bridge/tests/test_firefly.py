@@ -1,6 +1,10 @@
 import unittest
 
-from sign402_bridge.firefly import parse_payment_approval, parse_policy_approval
+from sign402_bridge.firefly import (
+    format_payment_context_command,
+    parse_payment_approval,
+    parse_policy_approval,
+)
 
 
 class FireflyTests(unittest.TestCase):
@@ -61,6 +65,34 @@ class FireflyTests(unittest.TestCase):
         self.assertFalse(approval["approved"])
         self.assertEqual(approval["approvedHash"], payment_hash)
         self.assertEqual(approval["error"], "PAYMENT rejected by user")
+
+    def test_format_payment_context_command_sanitizes_display_lines(self):
+        command = format_payment_context_command(
+            [
+                "x402 WEATHER",
+                "0.01 USDC",
+                "GoPlausible API | weather\nextra",
+                "ignored",
+            ]
+        )
+
+        self.assertEqual(
+            command,
+            "PAYMENT-CONTEXT=x402 WEATHER|0.01 USDC|GoPlausible API weather extra",
+        )
+
+    def test_format_payment_context_command_truncates_long_lines(self):
+        command = format_payment_context_command(
+            [
+                "official x402 weather resource",
+                "100000000000000000000000000000000",
+            ]
+        )
+
+        self.assertEqual(
+            command,
+            "PAYMENT-CONTEXT=official x402 weather resource|1000000000000000000000000000000",
+        )
 
 
 if __name__ == "__main__":
