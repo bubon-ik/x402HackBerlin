@@ -27,9 +27,10 @@ from sign402_live.flow import build_payment_commitment
 from sign402_live.http_resource import X402ResourceClient
 from sign402_bridge.firefly import FireflyClient, find_firefly_port
 from sign402_bridge.policy import canonicalize_policy, hash_policy
-from sign402_executor.executor import execute_payment
+from sign402_executor.executor import build_x402_avm_payment_signature_header, execute_payment
 from x402_demo.core import encode_payment_proof
 
+from .goplausible import fetch_x402_paid_resource, fetch_x402_payment_required, normalize_x402_payment_required
 
 HEX_32_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 
@@ -50,6 +51,8 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
                         "/execute-payment",
                         "/events/latest",
                         "/agent/buy-probe",
+                        "/agent/inspect-x402",
+                        "/agent/buy-x402",
                     ],
                 }
             )
@@ -75,6 +78,12 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
             return
         if path == "/agent/buy-probe":
             self._handle_agent_buy_probe()
+            return
+        if path == "/agent/inspect-x402":
+            self._handle_agent_inspect_x402()
+            return
+        if path == "/agent/buy-x402":
+            self._handle_agent_buy_x402()
             return
         self._send_json({"error": "not_found"}, status=404)
 
@@ -195,6 +204,49 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
         finally:
             self._release_firefly()
 
+    def _handle_agent_inspect_x402(self) -> None:
+        try:
+            payload = self._read_json()
+            resource_url = str(payload.get("url", "")).strip()
+            if not resource_url:
+                raise ValueError("url is required")
+
+            policy_hash = self._policy_hash_from_payload_or_state(payload)
+            result = self.server.x402_inspector(resource_url, policy_hash)
+            self._send_json(result)
+        except Exception as exc:
+            self._send_json({"ok": False, "error": str(exc)}, status=400)
+
+    def _handle_agent_buy_x402(self) -> None:
+        if not self._acquire_firefly():
+            self._send_json(_busy_payload(), status=409)
+            return
+
+        try:
+            payload = self._read_json()
+            resource_url = str(payload.get("url", "")).strip()
+            if not resource_url:
+                raise ValueError("url is required")
+
+            result = self.server.x402_buyer(resource_url)
+            self._send_json(result)
+        except Exception as exc:
+            self._send_json({"decision": "rejected", "ok": False, "error": str(exc)}, status=400)
+        finally:
+            self._release_firefly()
+
+    def _policy_hash_from_payload_or_state(self, payload: dict[str, Any]) -> str:
+        if payload.get("policyHash"):
+            return _read_hash(payload, "policyHash")
+
+        policy_state = self.server.agent_state_store.read_policy()
+        if policy_state is None:
+            raise ValueError("policyHash is required when no policy is stored")
+        policy_hash = str(policy_state.get("policyHash", "")).lower()
+        if not HEX_32_RE.fullmatch(policy_hash):
+            raise ValueError("stored policyHash must be 64 hex characters")
+        return policy_hash
+
     def _read_json(self) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length", "0"))
         body = self.rfile.read(length)
@@ -253,6 +305,8 @@ class Sign402GatewayServer(ThreadingHTTPServer):
         event_store: "LatestEventStore",
         agent_state_store: "AgentStateStore",
         agent_buy_probe: Callable[[str], dict[str, Any]],
+        x402_inspector: Callable[[str, str], dict[str, Any]],
+        x402_buyer: Callable[[str], dict[str, Any]],
     ):
         super().__init__(server_address, handler_class)
         self.firefly = firefly
@@ -260,6 +314,8 @@ class Sign402GatewayServer(ThreadingHTTPServer):
         self.event_store = event_store
         self.agent_state_store = agent_state_store
         self.agent_buy_probe = agent_buy_probe
+        self.x402_inspector = x402_inspector
+        self.x402_buyer = x402_buyer
         self.firefly_lock = threading.Lock()
 
 
@@ -275,8 +331,16 @@ def build_server(
 ) -> Sign402GatewayServer:
     firefly = FireflyClient(port=firefly_port)
     payment_executor = build_payment_executor(payment_executor_dir)
+    x402_payment_signature_builder = build_x402_payment_signature_builder(payment_executor_dir)
     event_store = LatestEventStore(event_store_path)
     agent_state_store = AgentStateStore(agent_state_path)
+    x402_inspector = ExternalX402Inspector()
+    x402_buyer = ExternalX402Buyer(
+        firefly=firefly,
+        payment_signature_builder=x402_payment_signature_builder,
+        event_store=event_store,
+        agent_state_store=agent_state_store,
+    )
     agent_buy_probe = AgentBuyProbeRunner(
         firefly=firefly,
         payment_executor=payment_executor,
@@ -292,6 +356,8 @@ def build_server(
         event_store=event_store,
         agent_state_store=agent_state_store,
         agent_buy_probe=agent_buy_probe,
+        x402_inspector=x402_inspector,
+        x402_buyer=x402_buyer,
     )
 
 
@@ -313,6 +379,23 @@ def build_payment_executor(payment_executor_dir: Path):
         )
 
     return pay
+
+
+def build_x402_payment_signature_builder(payment_executor_dir: Path):
+    env = _read_env(payment_executor_dir / ".env")
+    sender = env["ALGORAND_SENDER"]
+    private_key = env["ALGORAND_PRIVATE_KEY"]
+    algod_url = env.get("ALGOD_URL", "https://testnet-api.algonode.cloud")
+
+    def build_signature(payment_required: dict[str, Any]) -> dict[str, Any]:
+        return build_x402_avm_payment_signature_header(
+            payment_required=payment_required,
+            sender=sender,
+            private_key=private_key,
+            algod_url=algod_url,
+        )
+
+    return build_signature
 
 
 def main() -> None:
@@ -472,6 +555,114 @@ class AgentBuyProbeRunner:
             if attempt < 7:
                 time.sleep(2)
         return last_response
+
+
+class ExternalX402Inspector:
+    def __call__(self, resource_url: str, policy_hash: str) -> dict[str, Any]:
+        payload = fetch_x402_payment_required(resource_url)
+        requirement = normalize_x402_payment_required(payload, resource_url=resource_url)
+        payment_commitment = build_payment_commitment(requirement, policy_hash)
+        return {
+            "ok": True,
+            "mode": "inspect_only",
+            "resourceUrl": resource_url,
+            "source": "goplausible-x402",
+            "rawPaymentRequired": payload,
+            "paymentRequirements": requirement,
+            "paymentCommitment": payment_commitment,
+            "nextStep": "Use x402-avm to build official X-PAYMENT paymentGroup before executing.",
+        }
+
+
+class ExternalX402Buyer:
+    def __init__(
+        self,
+        *,
+        firefly: FireflyClient,
+        payment_signature_builder: Callable[[dict[str, Any]], dict[str, Any]],
+        event_store: "LatestEventStore",
+        agent_state_store: "AgentStateStore",
+    ):
+        self.firefly = firefly
+        self.payment_signature_builder = payment_signature_builder
+        self.event_store = event_store
+        self.agent_state_store = agent_state_store
+
+    def __call__(self, resource_url: str) -> dict[str, Any]:
+        policy_state = self.agent_state_store.read_policy()
+        if policy_state is None:
+            raise ValueError("No Firefly-approved policy stored. Call /approve-policy first.")
+
+        policy = policy_state["policy"]
+        policy_hash = str(policy_state["policyHash"]).lower()
+        approved_hash = str(policy_state["firefly"]["approvedHash"]).lower()
+        if policy_hash != approved_hash:
+            raise ValueError("Stored policy hash does not match Firefly approval.")
+
+        raw_payment_required = fetch_x402_payment_required(resource_url)
+        requirement = normalize_x402_payment_required(raw_payment_required, resource_url=resource_url)
+        self.agent_state_store.validate_policy_allows(policy, policy_hash, requirement)
+
+        payment_commitment = build_payment_commitment(requirement, policy_hash)
+        payment_hash = payment_commitment["paymentHash"]
+        approval = self.firefly.approve_payment_hash(payment_hash)
+        if not approval.get("approved"):
+            event = {
+                "decision": "rejected_by_firefly",
+                "ok": False,
+                "resourceUrl": resource_url,
+                "policyHash": policy_hash,
+                "paymentApprovalHash": payment_hash,
+                "paymentRequirements": requirement,
+                "firefly": approval,
+            }
+            self.event_store.write(event)
+            return event
+
+        if str(approval.get("approvedHash", "")).lower() != payment_hash:
+            raise ValueError("Firefly approved hash does not match payment commitment hash.")
+
+        payment_signature = self.payment_signature_builder(raw_payment_required)
+        resource_result = fetch_x402_paid_resource(
+            resource_url,
+            payment_signature_header=payment_signature["headerValue"],
+        )
+        if int(resource_result.get("status", 0)) != 200:
+            raise ValueError(f"Official x402 resource denied payment: {resource_result}")
+
+        payment_response = resource_result.get("paymentResponse", {})
+        tx_id = payment_response.get("transaction")
+        self.agent_state_store.record_payment(
+            policy_hash,
+            requirement["paymentIntent"],
+            int(str(requirement["amountAtomic"])),
+        )
+
+        event = {
+            "decision": "approved_and_executed",
+            "ok": True,
+            "mode": "official_x402_avm",
+            "resourceUrl": resource_url,
+            "policyHash": policy_hash,
+            "paymentApprovalHash": payment_hash,
+            "txId": tx_id,
+            "paymentIntent": requirement["paymentIntent"],
+            "amountAtomic": requirement["amountAtomic"],
+            "asset": requirement["asset"],
+            "network": requirement["network"],
+            "x402Network": requirement.get("x402Network"),
+            "receiver": requirement["receiver"],
+            "deviceModel": approval.get("deviceModel"),
+            "deviceSerial": approval.get("deviceSerial"),
+            "remainingBudgetAtomic": str(self.agent_state_store.remaining_budget(policy_hash)),
+            "paymentRequirements": requirement,
+            "paymentCommitment": payment_commitment["commitment"],
+            "paymentResponse": payment_response,
+            "resourceResult": resource_result,
+            "result": "official_x402_resource_access_granted",
+        }
+        self.event_store.write(event)
+        return event
 
 
 class LatestEventStore:

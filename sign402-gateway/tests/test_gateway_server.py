@@ -15,6 +15,8 @@ class DummyServer:
     event_store = Mock()
     agent_state_store = Mock()
     agent_buy_probe = Mock()
+    x402_inspector = Mock()
+    x402_buyer = Mock()
 
 
 class FakeSocket:
@@ -231,6 +233,70 @@ class GatewayServerTests(unittest.TestCase):
         self.assertIn("HTTP/1.0 200 OK", response)
         self.assertIn('"decision": "approved_and_executed"', response)
         DummyServer.agent_buy_probe.assert_called_once_with("algorand.co")
+
+    def test_agent_inspect_x402_returns_normalized_external_requirements(self):
+        policy_hash = "c" * 64
+        DummyServer.x402_inspector.reset_mock()
+        DummyServer.x402_inspector.return_value = {
+            "ok": True,
+            "resourceUrl": "https://example.x402.goplausible.xyz/protected",
+            "paymentRequirements": {
+                "network": "algorand-testnet",
+                "x402Network": "algorand:SGO1GKSzyE7IEPItTxCByw9x8FmnrCDexi9/cOUJOiI=",
+                "asset": "10458941",
+                "amountAtomic": "10000",
+                "receiver": "PAYEE",
+                "resource": "https://example.x402.goplausible.xyz/protected",
+                "paymentIntent": "intent-from-resource",
+                "purpose": "x402_api_access",
+            },
+            "paymentCommitment": {
+                "paymentHash": "d" * 64,
+                "commitment": {"type": "sign402-payment"},
+            },
+        }
+
+        with patch("sys.stderr", io.StringIO()):
+            handler = self.make_handler(
+                "/agent/inspect-x402",
+                {
+                    "url": "https://example.x402.goplausible.xyz/protected",
+                    "policyHash": policy_hash,
+                },
+            )
+
+        response = self.response_text(handler)
+
+        self.assertIn("HTTP/1.0 200 OK", response)
+        self.assertIn('"ok": true', response)
+        self.assertIn('"amountAtomic": "10000"', response)
+        DummyServer.x402_inspector.assert_called_once_with(
+            "https://example.x402.goplausible.xyz/protected",
+            policy_hash,
+        )
+
+    def test_agent_buy_x402_runs_official_x402_buyer(self):
+        DummyServer.x402_buyer.reset_mock()
+        DummyServer.x402_buyer.return_value = {
+            "decision": "approved_and_executed",
+            "resourceUrl": "https://x402.goplausible.xyz/examples/weather",
+            "txId": "TXID",
+            "result": "paid_resource_access_granted",
+        }
+
+        with patch("sys.stderr", io.StringIO()):
+            handler = self.make_handler(
+                "/agent/buy-x402",
+                {"url": "https://x402.goplausible.xyz/examples/weather"},
+            )
+
+        response = self.response_text(handler)
+
+        self.assertIn("HTTP/1.0 200 OK", response)
+        self.assertIn('"decision": "approved_and_executed"', response)
+        DummyServer.x402_buyer.assert_called_once_with(
+            "https://x402.goplausible.xyz/examples/weather"
+        )
 
 
 class AgentStateStoreTests(unittest.TestCase):

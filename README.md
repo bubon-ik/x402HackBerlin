@@ -108,7 +108,57 @@ The gateway performs the full flow:
 request resource -> receive 402 -> check policy -> Firefly payment approval -> Algorand TestNet payment -> retry with X-Payment -> dashboard event
 ```
 
+## GoPlausible x402 Compatibility Lane
+
+The main demo remains the stable Firefly-approved TestNet flow above. A separate compatibility endpoint is now available for official GoPlausible/x402-v2 resources:
+
+```text
+POST <gateway-url>/agent/inspect-x402
+Content-Type: application/json
+
+{"url":"https://example.x402.goplausible.xyz/..."}
+```
+
+This endpoint fetches an external `402 Payment Required` response, accepts the official Algorand x402 fields (`amount`, `payTo`, CAIP-2 `network`, numeric ASA `asset`), normalizes them into the Sign402 payment commitment shape, and returns the Firefly `paymentApprovalHash` that would be approved before payment.
+
+Current status:
+
+- implemented: official GoPlausible/x402-v2 payment requirement parsing;
+- implemented: Sign402 payment hash construction from normalized official requirements;
+- implemented: official `x402-avm` `PAYMENT-SIGNATURE` payment group creation for Algorand TestNet USDC;
+- implemented: gateway endpoint `POST /agent/buy-x402` for Firefly-approved official GoPlausible purchases;
+- tested through Hermes Telegram: GoPlausible weather API returned `200 OK` with transaction `BTVGJ3MN42KKFBUN6BV3QRDZZDO54H2OCDX5LKHRU3PFASFYW72A`.
+
+For official GoPlausible payments, approve a policy whose `asset` is `10458941` and whose budget fields are in USDC atomic units. Then call:
+
+```text
+POST <gateway-url>/agent/buy-x402
+Content-Type: application/json
+
+{"url":"https://x402.goplausible.xyz/examples/weather"}
+```
+
+If an external x402 resource does not provide its own nonce or payment intent, the gateway creates a fresh local Sign402 intent for each purchase. This keeps replay protection on while still allowing repeat purchases from resources that return stable payment requirements.
+
 ## Latest Verified Run
+
+Official GoPlausible x402-v2 Telegram flow:
+
+```text
+command: buy goplausible weather
+decision: approved_and_executed
+mode: official_x402_avm
+asset: USDC TestNet ASA 10458941
+amountAtomic: 10000
+amount: 0.01 USDC
+txId: BTVGJ3MN42KKFBUN6BV3QRDZZDO54H2OCDX5LKHRU3PFASFYW72A
+receiver: ZMFK2OI7ZBD2U27ISERZC4S6LKM6WMFJPZQ4MYNJDZ2VNBNMBA67RA22AA
+remainingBudgetAtomic: 80000
+result: official_x402_resource_access_granted
+resource: https://x402.goplausible.xyz/examples/weather
+```
+
+The response included protected weather data for New York, London, Tokyo, Sydney, and Dubai after Firefly approval and GoPlausible facilitator settlement.
 
 The short-mode Telegram flow was verified end to end:
 
@@ -126,6 +176,7 @@ result: reachable
 ## Components
 
 - `sign402-gateway`: main orchestration API for Hermes.
+- `sign402-gateway/sign402_gateway/goplausible.py`: GoPlausible/x402-v2 requirement adapter.
 - `demo-resource-server`: x402-style protected resource and verifier.
 - `payment-executor`: local Algorand TestNet payment sender.
 - `demo-dashboard`: live trace for the pitch.
@@ -151,6 +202,7 @@ result: reachable
 ```bash
 cd "/Users/mp/Documents/Berlin Hack/sign402-gateway"
 python3 -m unittest tests/test_gateway_server.py
+python3 -m unittest tests/test_goplausible_adapter.py
 
 cd "/Users/mp/Documents/Berlin Hack/demo-resource-server"
 python3 -m unittest discover -s tests

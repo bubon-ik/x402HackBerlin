@@ -20,6 +20,13 @@
 - [x] Fix resource server to generate fresh `paymentIntent` per 402.
 - [x] Add Sign402 Gateway `/agent/buy-probe` orchestration endpoint.
 - [x] Update Hermes prompt to use only gateway `/agent/buy-probe`.
+- [x] Add GoPlausible/x402-v2 requirement inspection endpoint.
+- [x] Add GoPlausible/x402-v2 normalization tests.
+- [x] Opt sender account into GoPlausible TestNet USDC ASA `10458941`.
+- [x] Fund sender with TestNet USDC.
+- [x] Prove official GoPlausible weather x402 payment with `x402-avm`.
+- [x] Add gateway endpoint `POST /agent/buy-x402`.
+- [x] Prove official GoPlausible weather purchase through Hermes Telegram.
 - [ ] Rehearse the short-mode demo end to end.
 
 ### Done
@@ -81,6 +88,9 @@
 - [x] Create hackathon demo script.
 - [ ] Create pitch deck.
 - [ ] Prepare clean hackathon repo plan.
+- [x] Wire `x402-avm` SDK to create official `PAYMENT-SIGNATURE` payment groups.
+- [x] Test against a live GoPlausible protected API/resource.
+- [x] Rehearse `/agent/buy-x402` through Hermes Telegram with Firefly approval.
 
 ### Later / Milestone
 
@@ -102,6 +112,8 @@ We have a working short-mode demo:
   - `POST /approve-payment`
   - `POST /execute-payment`
   - `POST /agent/buy-probe`
+  - `POST /agent/inspect-x402`
+  - `POST /agent/buy-x402`
   - `GET/POST /events/latest`
 - The x402 demo resource server returns `402 Payment Required` with a fresh `paymentIntent` for each unpaid request.
 - The payment executor sends real Algorand TestNet payments.
@@ -111,7 +123,45 @@ We have a working short-mode demo:
   - latest tested `paymentApprovalHash`: `9176849009f5ab571de7eb647f3b718e7ed8c021a991afd9f3ee2c6a3bacea61`
   - latest tested `txId`: `HGZ2C5BLWRO6GVQPY3ORYHPAN463FFZWMJMJ5XOI52WQQFHWQR7A`
 
-The project is now in the **demo packaging phase**.
+The project is now in the **demo packaging plus official x402 compatibility phase**.
+
+## GoPlausible / Official x402 Status
+
+The project now has a separate compatibility lane for GoPlausible/x402-v2 resources:
+
+- `POST /agent/inspect-x402` fetches an external x402 resource.
+- It expects `402 Payment Required`.
+- It accepts official Algorand x402 fields:
+  - `amount`
+  - `payTo`
+  - CAIP-2 `network`
+  - numeric ASA `asset`
+  - `extra`
+- It normalizes them into the Sign402 payment commitment shape.
+- It returns the `paymentApprovalHash` that Firefly would approve.
+- `POST /agent/buy-x402` performs the official GoPlausible purchase path after Firefly approval.
+
+This proves the project can understand and pay a live official GoPlausible/x402-v2 resource. The implemented official path is:
+
+```text
+official 402 -> Firefly approval hash -> x402-avm paymentGroup -> PAYMENT-SIGNATURE -> facilitator settlement -> 200 OK
+```
+
+Hermes Telegram proof returned weather JSON from GoPlausible with transaction:
+
+```text
+BTVGJ3MN42KKFBUN6BV3QRDZZDO54H2OCDX5LKHRU3PFASFYW72A
+```
+
+Latest official x402 run:
+
+```text
+command: buy goplausible weather
+asset: USDC TestNet ASA 10458941
+amount: 10000 atomic / 0.01 USDC
+remaining budget: 80000 atomic / 0.08 USDC
+result: official_x402_resource_access_granted
+```
 
 ## Product Goal
 
