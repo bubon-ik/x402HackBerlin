@@ -1,0 +1,33 @@
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local virtual environments
+.venv/
+venv/
+env/
+payment-executor/.venv/
+
+# Secrets and local runtime config
+.env
+*.env
+!*.env.example
+payment-executor/.env
+
+# Demo runtime artifacts
+.demo-logs/
+demo-dashboard/latest-run.json
+demo-dashboard/agent-state.json
+
+# Generated presentation scratch workspace
+outputs/
+
+# Local editor files
+.vscode/
+.idea/

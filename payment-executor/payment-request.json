@@ -1,0 +1,10 @@
+{
+  "scheme": "exact",
+  "network": "algorand-testnet",
+  "asset": "ALGO_TEST",
+  "amountAtomic": "50000",
+  "receiver": "ERUMW536MUKV7T2JHM35HUQADFIW4SLELUPBNVR4CBJH34WRD7XMHADD6A",
+  "resource": "/probe?target=algorand.co",
+  "paymentIntent": "intent-cb77dc094504",
+  "purpose": "x402_api_access"
+}

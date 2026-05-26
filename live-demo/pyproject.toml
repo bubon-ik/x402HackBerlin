@@ -1,0 +1,10 @@
+[project]
+name = "hermes-sign402-live-demo"
+version = "0.1.0"
+description = "Live demo runner for Hermes Sign402"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+sign402-live-demo = "sign402_live.cli:main"
+

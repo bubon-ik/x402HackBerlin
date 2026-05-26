@@ -1,0 +1,670 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Hermes Sign402 Live Trace</title>
+  <style>
+    :root {
+      --bg: #f7f7f4;
+      --panel: #ffffff;
+      --ink: #18201d;
+      --muted: #66706b;
+      --line: #d9ded8;
+      --good: #14805e;
+      --good-soft: #e4f4ed;
+      --warn: #9a5b12;
+      --accent: #275a53;
+      --accent-soft: #ddebe8;
+      --code: #101614;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: 0;
+    }
+
+    main {
+      min-height: 100vh;
+      padding: 28px;
+    }
+
+    .shell {
+      max-width: 1360px;
+      margin: 0 auto;
+    }
+
+    .topbar {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 20px;
+      align-items: end;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 30px;
+      line-height: 1.08;
+      font-weight: 720;
+    }
+
+    .subtitle {
+      margin: 0;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.45;
+    }
+
+    .status {
+      min-width: 260px;
+      padding: 14px 16px;
+      background: var(--good-soft);
+      border: 1px solid #b9ddcf;
+      border-radius: 8px;
+    }
+
+    .status-label,
+    .label {
+      display: block;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .status-value {
+      display: block;
+      margin-top: 6px;
+      color: var(--good);
+      font-size: 18px;
+      font-weight: 760;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(340px, .8fr);
+      gap: 24px;
+      margin-top: 24px;
+      align-items: start;
+    }
+
+    section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    .section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      min-height: 58px;
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    h2 {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 740;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      height: 26px;
+      padding: 0 10px;
+      border: 1px solid #b9ddcf;
+      border-radius: 999px;
+      background: var(--good-soft);
+      color: var(--good);
+      font-size: 12px;
+      font-weight: 720;
+      white-space: nowrap;
+    }
+
+    .sync {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .trace {
+      padding: 8px 18px 18px;
+    }
+
+    .step {
+      display: grid;
+      grid-template-columns: 34px minmax(0, 1fr) auto;
+      gap: 14px;
+      position: relative;
+      min-height: 72px;
+      padding: 14px 0;
+      border-bottom: 1px solid #eef0ed;
+    }
+
+    .step:last-child {
+      border-bottom: 0;
+    }
+
+    .step::before {
+      content: "";
+      position: absolute;
+      left: 16px;
+      top: 48px;
+      bottom: -20px;
+      width: 2px;
+      background: var(--line);
+    }
+
+    .step:last-child::before {
+      display: none;
+    }
+
+    .num {
+      display: grid;
+      place-items: center;
+      width: 34px;
+      height: 34px;
+      border-radius: 50%;
+      background: var(--accent);
+      color: white;
+      font-size: 13px;
+      font-weight: 760;
+      z-index: 1;
+    }
+
+    .step-title {
+      margin: 0 0 5px;
+      font-size: 14px;
+      font-weight: 730;
+    }
+
+    .step-copy {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.42;
+    }
+
+    .step-state {
+      align-self: start;
+      padding: 5px 8px;
+      border-radius: 6px;
+      background: #f0f3f1;
+      color: var(--accent);
+      font-size: 11px;
+      font-weight: 760;
+      white-space: nowrap;
+    }
+
+    .facts {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      padding: 18px;
+    }
+
+    .fact {
+      min-height: 82px;
+      padding: 13px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfbfa;
+    }
+
+    .value {
+      display: block;
+      margin-top: 8px;
+      overflow-wrap: anywhere;
+      font-size: 14px;
+      line-height: 1.35;
+      font-weight: 680;
+    }
+
+    .mono {
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      font-size: 12px;
+      font-weight: 620;
+    }
+
+    .side {
+      display: grid;
+      gap: 18px;
+    }
+
+    .checks {
+      padding: 10px 18px 18px;
+    }
+
+    .check {
+      display: grid;
+      grid-template-columns: 24px minmax(0, 1fr);
+      gap: 10px;
+      align-items: start;
+      padding: 10px 0;
+      border-bottom: 1px solid #eef0ed;
+    }
+
+    .check:last-child {
+      border-bottom: 0;
+    }
+
+    .mark {
+      display: grid;
+      place-items: center;
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: var(--good-soft);
+      color: var(--good);
+      font-size: 13px;
+      font-weight: 820;
+    }
+
+    .check strong {
+      display: block;
+      font-size: 13px;
+      line-height: 1.35;
+    }
+
+    .check span {
+      display: block;
+      margin-top: 3px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+
+    pre {
+      margin: 0;
+      padding: 18px;
+      overflow: auto;
+      background: var(--code);
+      color: #dbe7df;
+      border-radius: 0 0 8px 8px;
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .hash-band {
+      margin-top: 24px;
+      padding: 16px 18px;
+      background: var(--accent-soft);
+      border: 1px solid #bdd2cd;
+      border-radius: 8px;
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .hash-band div {
+      min-width: 0;
+    }
+
+    @media (max-width: 980px) {
+      main {
+        padding: 18px;
+      }
+
+      .topbar,
+      .grid,
+      .hash-band {
+        grid-template-columns: 1fr;
+      }
+
+      .status {
+        min-width: 0;
+      }
+    }
+
+    @media (max-width: 640px) {
+      h1 {
+        font-size: 24px;
+      }
+
+      .facts {
+        grid-template-columns: 1fr;
+      }
+
+      .step {
+        grid-template-columns: 34px minmax(0, 1fr);
+      }
+
+      .step-state {
+        grid-column: 2;
+        justify-self: start;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="shell">
+      <div class="topbar">
+        <div>
+          <h1>Hermes Sign402 Live Trace</h1>
+          <p class="subtitle">Telegram agent payment over x402 on Algorand, gated by Firefly policy and payment approval.</p>
+        </div>
+        <div class="status">
+          <span class="status-label">Decision</span>
+          <span class="status-value" data-field="decision">APPROVED &amp; EXECUTED</span>
+        </div>
+      </div>
+
+      <div class="hash-band">
+        <div>
+          <span class="label">Policy Hash</span>
+          <span class="value mono" data-field="policyHash">ae33d87d9ac440117de46766714fff110be50e880e22ecf2056aaafb7df147ac</span>
+        </div>
+        <div>
+          <span class="label">Payment Approval Hash</span>
+          <span class="value mono" data-field="paymentApprovalHash">fb44b917f859229622903d48baa7cb398207c1b6ab8a973f7b8048806a7deec9</span>
+        </div>
+        <div>
+          <span class="label">Algorand TestNet Tx</span>
+          <span class="value mono" data-field="txId">6L4YPSZOCK74CPZ3H5GRD4JDMYL2BFVOVTUVIE2HJ34HEYKLEYKQ</span>
+        </div>
+      </div>
+
+      <div class="grid">
+        <section>
+          <div class="section-head">
+            <h2>Payment Flow</h2>
+            <span class="sync" data-field="syncStatus">fallback trace</span>
+          </div>
+          <div class="trace">
+            <div class="step">
+              <div class="num">1</div>
+              <div>
+                <p class="step-title">Telegram command</p>
+                <p class="step-copy" data-field="commandText">Hermes receives: buy x402 probe for algorand.co</p>
+              </div>
+              <div class="step-state">received</div>
+            </div>
+            <div class="step">
+              <div class="num">2</div>
+              <div>
+                <p class="step-title">Protected resource requested</p>
+                <p class="step-copy">Resource server returns HTTP 402 with Algorand TestNet payment requirements.</p>
+              </div>
+              <div class="step-state">402</div>
+            </div>
+            <div class="step">
+              <div class="num">3</div>
+              <div>
+                <p class="step-title">Policy enforcement</p>
+                <p class="step-copy">Hermes checks asset, purpose, amount, remaining budget, and replay protection.</p>
+              </div>
+              <div class="step-state">allowed</div>
+            </div>
+            <div class="step">
+              <div class="num">4</div>
+              <div>
+                <p class="step-title">Firefly payment approval</p>
+                <p class="step-copy">Gateway sends PAYMENT hash to Firefly. User approves on-device.</p>
+              </div>
+              <div class="step-state">approved</div>
+            </div>
+            <div class="step">
+              <div class="num">5</div>
+              <div>
+                <p class="step-title">Gateway executes payment</p>
+                <p class="step-copy">The Mac gateway sends the Algorand payment. Hermes never receives the private key.</p>
+              </div>
+              <div class="step-state">sent</div>
+            </div>
+            <div class="step">
+              <div class="num">6</div>
+              <div>
+                <p class="step-title">x402 retry</p>
+                <p class="step-copy">Hermes retries the resource with X-Payment proof and Sign402 trace data.</p>
+              </div>
+              <div class="step-state">verified</div>
+            </div>
+            <div class="step">
+              <div class="num">7</div>
+              <div>
+                <p class="step-title">Access granted</p>
+                <p class="step-copy" data-field="accessText">Probe result is returned: algorand.co reachable from Berlin with 42 ms latency.</p>
+              </div>
+              <div class="step-state">200</div>
+            </div>
+          </div>
+        </section>
+
+        <div class="side">
+          <section>
+            <div class="section-head">
+              <h2>Run Facts</h2>
+              <span class="pill">TestNet</span>
+            </div>
+            <div class="facts">
+              <div class="fact">
+                <span class="label">Resource</span>
+                <span class="value mono" data-field="resource">/probe?target=algorand.co</span>
+              </div>
+              <div class="fact">
+                <span class="label">Amount</span>
+                <span class="value" data-field="amount">50,000 microALGO</span>
+              </div>
+              <div class="fact">
+                <span class="label">Asset</span>
+                <span class="value" data-field="asset">ALGO_TEST</span>
+              </div>
+              <div class="fact">
+                <span class="label">Network</span>
+                <span class="value" data-field="network">algorand-testnet</span>
+              </div>
+              <div class="fact">
+                <span class="label">Device</span>
+                <span class="value" data-field="device">Model 262 / Serial 1056</span>
+              </div>
+              <div class="fact">
+                <span class="label">Remaining Budget</span>
+                <span class="value" data-field="remainingBudget">950,000 microALGO</span>
+              </div>
+            </div>
+          </section>
+
+          <section>
+            <div class="section-head">
+              <h2>Security Gates</h2>
+              <span class="pill">passed</span>
+            </div>
+            <div class="checks">
+              <div class="check">
+                <div class="mark">✓</div>
+                <div>
+                  <strong>Policy hash matched Firefly approval</strong>
+                  <span>Stored policy approval matches the active policy hash.</span>
+                </div>
+              </div>
+              <div class="check">
+                <div class="mark">✓</div>
+                <div>
+                  <strong>Payment hash approved on Firefly</strong>
+                  <span>Gateway continued only after the returned approval hash matched.</span>
+                </div>
+              </div>
+              <div class="check">
+                <div class="mark">✓</div>
+                <div>
+                  <strong>Replay protection passed</strong>
+                  <span data-field="replayText">paymentIntent intent-cb77dc094504 was fresh for this run.</span>
+                </div>
+              </div>
+              <div class="check">
+                <div class="mark">✓</div>
+                <div>
+                  <strong>Private key stayed local</strong>
+                  <span>Only the Mac gateway executed the Algorand transaction.</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section>
+            <div class="section-head">
+              <h2>Resource Response</h2>
+            </div>
+            <pre data-field="resourceJson">{
+  "target": "algorand.co",
+  "location": "Berlin",
+  "httpStatus": 200,
+  "latencyMs": 42,
+  "paymentTx": "6L4YPSZOCK74CPZ3H5GRD4JDMYL2BFVOVTUVIE2HJ34HEYKLEYKQ",
+  "paymentIntent": "intent-cb77dc094504",
+  "result": "reachable"
+}</pre>
+          </section>
+        </div>
+      </div>
+    </div>
+  </main>
+  <script>
+    const fallbackEvent = {
+      decision: "APPROVED & EXECUTED",
+      command: "buy x402 probe for algorand.co",
+      policyHash: "ae33d87d9ac440117de46766714fff110be50e880e22ecf2056aaafb7df147ac",
+      paymentApprovalHash: "fb44b917f859229622903d48baa7cb398207c1b6ab8a973f7b8048806a7deec9",
+      txId: "6L4YPSZOCK74CPZ3H5GRD4JDMYL2BFVOVTUVIE2HJ34HEYKLEYKQ",
+      resource: "/probe?target=algorand.co",
+      paymentIntent: "intent-cb77dc094504",
+      amountAtomic: "50000",
+      asset: "ALGO_TEST",
+      network: "algorand-testnet",
+      deviceModel: 262,
+      deviceSerial: 1056,
+      remainingBudgetAtomic: "950000",
+      resourceResult: {
+        target: "algorand.co",
+        location: "Berlin",
+        httpStatus: 200,
+        latencyMs: 42,
+        paymentTx: "6L4YPSZOCK74CPZ3H5GRD4JDMYL2BFVOVTUVIE2HJ34HEYKLEYKQ",
+        paymentIntent: "intent-cb77dc094504",
+        result: "reachable"
+      }
+    };
+
+    const endpoint = "http://127.0.0.1:8099/events/latest";
+
+    function pick(event, paths, fallback = "") {
+      for (const path of paths) {
+        const value = path.split(".").reduce((current, key) => {
+          if (current && Object.prototype.hasOwnProperty.call(current, key)) {
+            return current[key];
+          }
+          return undefined;
+        }, event);
+        if (value !== undefined && value !== null && value !== "") {
+          return value;
+        }
+      }
+      return fallback;
+    }
+
+    function formatAtomic(value) {
+      const number = Number(value || 0);
+      return Number.isFinite(number) ? number.toLocaleString("en-US") : String(value || "");
+    }
+
+    function normalizeEvent(event) {
+      const txId = pick(event, ["txId", "payment.txId", "paymentProof.txId", "resourceResult.paymentTx"], fallbackEvent.txId);
+      const paymentIntent = pick(event, ["paymentIntent", "payment.paymentIntent", "paymentRequirements.paymentIntent", "resourceResult.paymentIntent"], fallbackEvent.paymentIntent);
+      const target = pick(event, ["target", "resourceResult.target"], "algorand.co");
+      const result = pick(event, ["result", "resourceResult.result"], "reachable");
+      const latencyMs = pick(event, ["latencyMs", "resourceResult.latencyMs"], 42);
+      const deviceModel = pick(event, ["deviceModel", "firefly.deviceModel", "fireflyApproval.deviceModel"], fallbackEvent.deviceModel);
+      const deviceSerial = pick(event, ["deviceSerial", "firefly.deviceSerial", "fireflyApproval.deviceSerial"], fallbackEvent.deviceSerial);
+      const amountAtomic = pick(event, ["amountAtomic", "amount", "payment.amountAtomic", "paymentRequirements.amountAtomic"], fallbackEvent.amountAtomic);
+
+      return {
+        decision: pick(event, ["decision", "status"], fallbackEvent.decision),
+        command: pick(event, ["command"], fallbackEvent.command),
+        policyHash: pick(event, ["policyHash", "payment.policyHash"], fallbackEvent.policyHash),
+        paymentApprovalHash: pick(event, ["paymentApprovalHash"], fallbackEvent.paymentApprovalHash),
+        txId,
+        resource: pick(event, ["resource", "paymentRequirements.resource", "paymentProof.resource"], fallbackEvent.resource),
+        paymentIntent,
+        amountAtomic,
+        asset: pick(event, ["asset", "payment.asset", "paymentRequirements.asset"], fallbackEvent.asset),
+        network: pick(event, ["network", "payment.network", "paymentRequirements.network"], fallbackEvent.network),
+        deviceModel,
+        deviceSerial,
+        remainingBudgetAtomic: pick(event, ["remainingBudgetAtomic"], fallbackEvent.remainingBudgetAtomic),
+        target,
+        result,
+        latencyMs,
+        resourceResult: {
+          target,
+          location: pick(event, ["location", "resourceResult.location"], "Berlin"),
+          httpStatus: pick(event, ["httpStatus", "resourceResult.httpStatus"], 200),
+          latencyMs,
+          paymentTx: txId,
+          paymentIntent,
+          result
+        }
+      };
+    }
+
+    function setField(name, value) {
+      document.querySelectorAll(`[data-field="${name}"]`).forEach((node) => {
+        node.textContent = value;
+      });
+    }
+
+    function render(event, source) {
+      const view = normalizeEvent(event || fallbackEvent);
+      setField("decision", view.decision);
+      setField("policyHash", view.policyHash);
+      setField("paymentApprovalHash", view.paymentApprovalHash);
+      setField("txId", view.txId);
+      setField("commandText", `Hermes receives: ${view.command}`);
+      setField("accessText", `Probe result is returned: ${view.target} ${view.result} from Berlin with ${view.latencyMs} ms latency.`);
+      setField("resource", view.resource);
+      setField("amount", `${formatAtomic(view.amountAtomic)} microALGO`);
+      setField("asset", view.asset);
+      setField("network", view.network);
+      setField("device", `Model ${view.deviceModel} / Serial ${view.deviceSerial}`);
+      setField("remainingBudget", `${formatAtomic(view.remainingBudgetAtomic)} microALGO`);
+      setField("replayText", `paymentIntent ${view.paymentIntent} was fresh for this run.`);
+      setField("resourceJson", JSON.stringify(view.resourceResult, null, 2));
+      setField("syncStatus", source === "live" ? "live from gateway" : "fallback trace");
+    }
+
+    async function refresh() {
+      try {
+        const response = await fetch(endpoint, { cache: "no-store" });
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+        const payload = await response.json();
+        render(payload.event || fallbackEvent, payload.event ? "live" : "fallback");
+      } catch {
+        render(fallbackEvent, "fallback");
+      }
+    }
+
+    render(fallbackEvent, "fallback");
+    refresh();
+    window.setInterval(refresh, 2000);
+  </script>
+</body>
+</html>

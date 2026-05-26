@@ -1,0 +1,11 @@
+[project]
+name = "sign402-gateway"
+version = "0.1.0"
+description = "Unified local gateway for Hermes Sign402 Firefly approvals and Algorand payment execution"
+requires-python = ">=3.11"
+dependencies = [
+  "pyserial>=3.5"
+]
+
+[project.scripts]
+sign402-gateway = "sign402_gateway.server:main"
