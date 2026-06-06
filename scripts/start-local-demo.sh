@@ -129,7 +129,7 @@ main() {
     "$ROOT_DIR/demo-dashboard" \
     "$PYTHON_BIN" -m http.server "$DASHBOARD_PORT" --bind 127.0.0.1
 
-  wait_for_health "resource server" "http://127.0.0.1:$RESOURCE_PORT/health"
+  wait_for_health "resource" "http://127.0.0.1:$RESOURCE_PORT/health"
   wait_for_health "gateway" "http://127.0.0.1:$GATEWAY_PORT/health"
   wait_for_health "dashboard" "http://127.0.0.1:$DASHBOARD_PORT/"
 
