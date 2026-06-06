@@ -6,6 +6,30 @@ The project goal is to let an AI agent access paid x402-protected resources whil
 
 > x402 explains how agents pay. SingIt explains how humans safely authorize agents to pay.
 
+## How It Works
+
+```mermaid
+flowchart LR
+    U["User in Telegram"] --> A["SingIt Agent"]
+    A --> G["SingIt Gateway"]
+    G --> F["Firefly Approval"]
+
+    F -->|Approved| T["TestNet USDC<br/>Weather / QR"]
+    F -->|Approved| M["MainNet EURD<br/>Quantoz"]
+    F -->|Rejected| X["No payment"]
+
+    T --> R["Receipt + transaction link"]
+    M --> R
+    R --> A
+    A --> U
+
+    K["Private keys stay local"] -.-> G
+```
+
+- **TestNet rail:** SingIt buys weather data or QR generation through x402 using USDC on Algorand TestNet.
+- **MainNet rail:** SingIt sends EURD on Algorand MainNet through the optional Quantoz payment path.
+- **Human control:** Firefly must approve the exact payment before the local gateway can submit it.
+
 ## What Judges Should Try
 
 Start the local demo stack:
