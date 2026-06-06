@@ -6,6 +6,7 @@ import re
 import sys
 import threading
 import time
+import urllib.error
 from urllib.parse import quote, urlparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -331,7 +332,7 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
         except TimeoutError:
             self._send_json(_firefly_timeout_payload(decision=True), status=504)
         except Exception as exc:
-            self._send_json({"decision": "rejected", "ok": False, "error": str(exc)}, status=400)
+            self._send_json(_exception_payload(exc), status=400)
         finally:
             self._release_firefly()
 
@@ -398,7 +399,7 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
         except TimeoutError:
             self._send_json(_firefly_timeout_payload(decision=True), status=504)
         except Exception as exc:
-            self._send_json({"decision": "rejected", "ok": False, "error": str(exc)}, status=400)
+            self._send_json(_exception_payload(exc), status=400)
         finally:
             self._release_firefly()
 
@@ -1543,6 +1544,34 @@ def _firefly_timeout_payload(
     if decision:
         payload["decision"] = "firefly_timeout"
         payload["ok"] = False
+    return payload
+
+
+def _exception_payload(exc: Exception) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "decision": "rejected",
+        "ok": False,
+        "error": str(exc),
+        "errorType": type(exc).__name__,
+    }
+    if isinstance(exc, urllib.error.HTTPError):
+        payload["httpStatus"] = exc.code
+        payload["httpReason"] = exc.reason
+        try:
+            payload["httpBody"] = exc.read().decode("utf-8", "replace")[:1000]
+        except Exception:
+            pass
+
+    if type(exc).__name__ == "AlgodHTTPError":
+        args = getattr(exc, "args", ())
+        if args:
+            payload["algodMessage"] = str(args[0])
+        code = getattr(exc, "code", None)
+        if code is not None:
+            payload["httpStatus"] = code
+        data = getattr(exc, "data", None)
+        if data is not None:
+            payload["algodData"] = data
     return payload
 
 
