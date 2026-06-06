@@ -1,18 +1,55 @@
-# x402 Hack Berlin
+# Hermes Sign402
 
-Hackathon prototype for a hardware-approved x402 payment flow.
+Hardware-approved x402 payments for agentic commerce on Algorand.
 
-The project goal is to let an AI agent access paid x402-protected resources while keeping payment approval under explicit user control. The agent can request a purchase, but a local gateway and hardware approval step decide whether a real payment is allowed.
+The project goal is to let an AI agent access paid x402-protected resources while keeping payment approval under explicit user control. The agent can request a purchase, but a local gateway and Firefly hardware approval step decide whether a real payment is allowed.
+
+> x402 explains how agents pay. Hermes Sign402 explains how humans safely authorize agents to pay.
+
+## Why This Matters
+
+x402 makes HTTP `402 Payment Required` usable for AI agents, paid APIs, premium data, on-demand compute, and machine-to-machine commerce. That unlocks agentic commerce, but it also creates a trust problem: an autonomous agent should not receive unlimited wallet access just because it can discover paid resources.
+
+Hermes Sign402 adds the missing consent layer:
+
+- **Policy control:** Firefly approves a deterministic spending policy hash before the agent can spend.
+- **Payment control:** Firefly approves the exact payment commitment before the gateway executes it.
+- **Private-key isolation:** Hermes never receives the Algorand private key.
+- **Auditability:** every paid tool call has a policy hash, payment approval hash, tx id, amount, receiver, and remaining budget.
+
+## Live Proof
+
+The current demo buys the official GoPlausible weather API through x402 on Algorand TestNet USDC:
+
+```text
+Telegram command -> Sign402 Gateway -> GoPlausible HTTP 402 -> Firefly approval
+-> x402-avm PAYMENT-SIGNATURE -> Algorand settlement -> weather result
+```
+
+Example receipt:
+
+```text
+✅ Dubai Weather: 86°F, Sunny. Paid 0.01 USDC. Tx WCEOLASN65WVXWVOBAUVAPJHMHRNMLRPN6JIIHCMBPIFE7NDR4UA. Budget left 0.97 USDC.
+```
+
+## Alignment With x402 Themes
+
+- **Agentic commerce:** the user talks to Hermes in Telegram; Hermes discovers and buys a paid resource.
+- **Internet-native payments:** the gateway handles the official x402 `402 -> payment -> retry` flow.
+- **Algorand fit:** low fees, fast finality, and USDC support make small paid API calls practical.
+- **Security gap:** Firefly prevents rogue agent spending through hardware-in-the-loop approval.
+- **Discovery future:** `GET /agent/tools` is a minimal local paid-tool catalog that can evolve toward Bazaar/MCP-style resource discovery.
+- **ARC future:** ARC-90 instant top-ups and ARC-58 scoped account abstraction are natural next steps for reducing always-funded agent wallet risk.
 
 ## Planned Architecture
 
 ```text
-AI agent
-  -> Sign402 gateway
-  -> hardware approval bridge
-  -> payment executor
-  -> x402 protected resource
-  -> demo dashboard
+Hermes Telegram agent
+  -> Sign402 Gateway
+  -> Firefly approval layer
+  -> x402-avm payment executor
+  -> GoPlausible x402 resource
+  -> demo dashboard / audit trail
 ```
 
 ## Repository Layout

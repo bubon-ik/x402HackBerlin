@@ -83,6 +83,19 @@ For policy approval, the 64 hex characters are the full 32-byte SHA-256 hash of 
 
 This demonstrates a **hardware-in-the-loop policy approval**, not a full cryptographic policy signature. Strict mode adds physical approval for each payment hash. Full Firefly-side transaction signing or DS attestation is a future extension.
 
+## Alignment With x402 Workshop Themes
+
+The x402 workshop framing highlights that agentic commerce needs more than a payment rail. x402 gives agents an internet-native way to pay, but production agent commerce also needs discovery, trust, security, and user experience.
+
+Hermes Sign402 targets that missing layer:
+
+- **x402 payment flow:** the gateway implements the official HTTP `402 Payment Required` flow against GoPlausible, normalizes Algorand x402-v2 payment requirements, builds an `x402-avm` `PAYMENT-SIGNATURE`, and retries the paid resource.
+- **Agentic commerce UX:** the user stays in Telegram and can say commands such as `buy weather for Dubai`; Hermes receives a compact receipt instead of raw protocol JSON.
+- **Security and trust:** the agent never receives the Algorand private key. Firefly approval is required for the spending policy and for the exact payment commitment.
+- **Algorand fit:** low fees, fast finality, and TestNet USDC support make paid API calls and micropayments practical.
+- **Discovery path:** the gateway's `GET /agent/tools`, `POST /agent/inspect-tool`, and `POST /agent/buy-tool` endpoints are a local paid-tool catalog. This can evolve toward Bazaar/MCP-style discovery for agents, merchants, resources, payment methods, and facilitators.
+- **ARC path:** ARC-90-style exact top-ups and ARC-58-style scoped account abstraction are natural future milestones. They can reduce agent wallet risk by keeping agent accounts empty or delegating only transaction-scoped authority.
+
 ## Core User Story
 
 A user wants their Telegram AI agent to access paid APIs during a task without giving it unlimited wallet control.
