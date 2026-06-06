@@ -1,4 +1,5 @@
 import argparse
+import base64
 import hashlib
 import ipaddress
 import json
@@ -8,6 +9,7 @@ import sys
 import threading
 import time
 import urllib.error
+import urllib.request
 from urllib.parse import quote, urlparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -821,26 +823,88 @@ def build_eurd_payment_executor(wallet_env_path: Path | None = None):
     def pay(*, receiver: str, amount_atomic: int, note: bytes | None = None) -> dict[str, Any]:
         errors: list[str] = []
         for algod_url in algod_urls:
-            algod_client = AlgodClient("", algod_url)
             try:
-                payment = execute_asset_transfer(
-                    algod_client=algod_client,
+                payment = _execute_eurd_asset_transfer(
+                    algod_url=algod_url,
                     sender=sender,
                     private_key=private_key,
                     receiver=receiver,
-                    asset_id=EURD_ASA_ID,
                     amount_atomic=amount_atomic,
                     note=note,
-                    network=EURD_NETWORK,
-                    asset_name="EURD",
                 )
-                payment["algodUrl"] = algod_url
                 return payment
             except Exception as exc:
                 errors.append(f"{algod_url}: {type(exc).__name__}: {exc}")
         raise RuntimeError("EURD broadcast failed on all algod endpoints: " + " | ".join(errors))
 
     return pay
+
+
+def _execute_eurd_asset_transfer(
+    *,
+    algod_url: str,
+    sender: str,
+    private_key: str,
+    receiver: str,
+    amount_atomic: int,
+    note: bytes | None = None,
+) -> dict[str, Any]:
+    from algosdk.encoding import msgpack_encode
+    from algosdk.transaction import AssetTransferTxn
+    from algosdk.v2client.algod import AlgodClient
+
+    algod_client = AlgodClient("", algod_url)
+    if amount_atomic <= 0:
+        raise ValueError("amount_atomic must be positive")
+    if not receiver:
+        raise ValueError("receiver is required")
+
+    tx = AssetTransferTxn(
+        sender=sender,
+        sp=algod_client.suggested_params(),
+        receiver=receiver,
+        amt=int(amount_atomic),
+        index=EURD_ASA_ID,
+        note=note,
+    )
+    signed_tx = tx.sign(private_key)
+    raw_txn = base64.b64decode(msgpack_encode(signed_tx))
+    tx_id = _broadcast_raw_transaction(algod_url, raw_txn)
+    return {
+        "txId": tx_id,
+        "network": EURD_NETWORK,
+        "receiver": receiver,
+        "amountAtomic": str(int(amount_atomic)),
+        "asset": "EURD",
+        "assetId": str(EURD_ASA_ID),
+        "note": note.decode("utf-8") if note else "",
+        "algodUrl": algod_url,
+    }
+
+
+def _broadcast_raw_transaction(algod_url: str, raw_txn: bytes) -> str:
+    url = algod_url.rstrip("/") + "/v2/transactions"
+    request = urllib.request.Request(
+        url,
+        data=raw_txn,
+        method="POST",
+        headers={
+            "Content-Type": "application/x-binary",
+            "Accept": "application/json",
+            "User-Agent": "Hermes-Sign402/0.1",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", "replace")
+        raise RuntimeError(f"HTTP {exc.code} from {url}: {body[:500]}") from exc
+
+    tx_id = payload.get("txId")
+    if not tx_id:
+        raise RuntimeError(f"Algod broadcast response missing txId: {payload}")
+    return str(tx_id)
 
 
 def main() -> None:
