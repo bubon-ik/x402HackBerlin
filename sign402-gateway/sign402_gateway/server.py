@@ -48,6 +48,11 @@ EURD_ASSET_DECIMALS = 2
 EURD_NETWORK = "algorand-mainnet"
 EURD_MAX_AMOUNT_ATOMIC = 100
 DEFAULT_QUANTOZ_WALLET_ENV_PATH = ROOT_DIR.parent / "quantoz-mainnet-wallet.env"
+DEFAULT_MAINNET_ALGOD_URLS = [
+    "https://mainnet-api.4160.nodely.dev",
+    "https://mainnet-api.algonode.network",
+    "https://mainnet-api.algonode.cloud",
+]
 
 
 PAYMENT_RAILS: dict[str, dict[str, Any]] = {
@@ -801,24 +806,39 @@ def build_eurd_payment_executor(wallet_env_path: Path | None = None):
         return unavailable_pay
 
     env = _read_env(path)
-    algod_client = AlgodClient("", env.get("ALGOD_URL", "https://mainnet-api.algonode.cloud"))
+    algod_urls = _dedupe_strings(
+        [
+            env.get("ALGOD_URL", ""),
+            *str(env.get("ALGOD_FALLBACK_URLS", "")).split(","),
+            *DEFAULT_MAINNET_ALGOD_URLS,
+        ]
+    )
     sender = env.get("ALGORAND_MAINNET_ADDRESS") or env.get("ALGORAND_SENDER")
     private_key = env["ALGORAND_PRIVATE_KEY"]
     if not sender:
         raise ValueError("Quantoz wallet env must include ALGORAND_MAINNET_ADDRESS or ALGORAND_SENDER")
 
     def pay(*, receiver: str, amount_atomic: int, note: bytes | None = None) -> dict[str, Any]:
-        return execute_asset_transfer(
-            algod_client=algod_client,
-            sender=sender,
-            private_key=private_key,
-            receiver=receiver,
-            asset_id=EURD_ASA_ID,
-            amount_atomic=amount_atomic,
-            note=note,
-            network=EURD_NETWORK,
-            asset_name="EURD",
-        )
+        errors: list[str] = []
+        for algod_url in algod_urls:
+            algod_client = AlgodClient("", algod_url)
+            try:
+                payment = execute_asset_transfer(
+                    algod_client=algod_client,
+                    sender=sender,
+                    private_key=private_key,
+                    receiver=receiver,
+                    asset_id=EURD_ASA_ID,
+                    amount_atomic=amount_atomic,
+                    note=note,
+                    network=EURD_NETWORK,
+                    asset_name="EURD",
+                )
+                payment["algodUrl"] = algod_url
+                return payment
+            except Exception as exc:
+                errors.append(f"{algod_url}: {type(exc).__name__}: {exc}")
+        raise RuntimeError("EURD broadcast failed on all algod endpoints: " + " | ".join(errors))
 
     return pay
 
@@ -1270,6 +1290,18 @@ def _read_env(path: Path) -> dict[str, str]:
         key, value = line.split("=", 1)
         env[key] = value.strip().strip('"')
     return env
+
+
+def _dedupe_strings(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        normalized = value.strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        result.append(normalized)
+    return result
 
 
 def _read_hash(payload: dict[str, Any], key: str) -> str:
