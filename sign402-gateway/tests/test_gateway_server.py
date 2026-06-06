@@ -528,6 +528,8 @@ class GatewayServerTests(unittest.TestCase):
         self.assertIn("HTTP/1.0 200 OK", response)
         self.assertIn('"toolId": "goplausible.weather"', response)
         self.assertIn('"command": "buy goplausible weather"', response)
+        self.assertNotIn('"telegramText"', response)
+        self.assertNotIn('"summary"', response)
         DummyServer.x402_inspector.assert_called_once_with(
             "https://x402.goplausible.xyz/examples/weather",
             policy_hash,

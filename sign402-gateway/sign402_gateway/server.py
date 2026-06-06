@@ -1370,9 +1370,15 @@ def _tool_summary(
     result: dict[str, Any],
     request_context: dict[str, Any],
 ) -> dict[str, Any] | None:
+    if str(result.get("mode", "")).endswith("inspect_only"):
+        return None
+
     if tool.get("id") != "goplausible.weather" or not result.get("ok"):
         if tool.get("id") == "sign402.qr" and result.get("ok"):
             return _qr_tool_summary(result, request_context)
+        return None
+
+    if not result.get("txId") or result.get("amountAtomic") is None:
         return None
 
     city = request_context.get("city")
