@@ -57,6 +57,7 @@ After buying weather, reply using only telegramText.
 After buying QR, send qrImageUrl as a Telegram photo and use telegramText as the caption. If you cannot send a photo, reply with telegramText and then qrImageUrl on the next line.
 If the gateway returns error=firefly_timeout, tell me: "Firefly approval timed out. Please press approve faster and retry the purchase."
 If the gateway returns decision=rejected_by_firefly, do not retry and reply with telegramText exactly. Do not suggest that Firefly is locked, broken, or needs another attempt.
+Do not claim that a city is unsupported when a weather request fails. GoPlausible returns all supported cities in one paid forecast; a 403 is a payment verification/provider error, not a city-specific error.
 Do not build the x402 payment yourself. Do not ask for private keys. Only call the Sign402 Gateway.
 ```
 

@@ -883,7 +883,7 @@ class ExternalX402Buyer:
             raise ValueError("Firefly approved hash does not match payment commitment hash.")
 
         payment_signature = self.payment_signature_builder(raw_payment_required)
-        resource_result = fetch_x402_paid_resource(
+        resource_result = _fetch_x402_paid_resource_with_retry(
             resource_url,
             payment_signature_header=payment_signature["headerValue"],
         )
@@ -923,6 +923,29 @@ class ExternalX402Buyer:
         }
         self.event_store.write(event)
         return event
+
+
+def _fetch_x402_paid_resource_with_retry(
+    resource_url: str,
+    *,
+    payment_signature_header: str,
+    max_attempts: int = 3,
+    retry_delay_seconds: float = 2.0,
+) -> dict[str, Any]:
+    last_result: dict[str, Any] = {}
+    for attempt in range(max_attempts):
+        last_result = fetch_x402_paid_resource(
+            resource_url,
+            payment_signature_header=payment_signature_header,
+        )
+        status = int(last_result.get("status", 0))
+        if status == 200:
+            return last_result
+        if status not in {402, 403, 404}:
+            return last_result
+        if attempt < max_attempts - 1:
+            time.sleep(retry_delay_seconds)
+    return last_result
 
 
 class LatestEventStore:

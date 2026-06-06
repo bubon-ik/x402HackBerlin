@@ -918,6 +918,78 @@ class GatewayServerTests(unittest.TestCase):
             ["x402 QR CODE", "0.01 USDC", "Sign402 Generator"],
         )
 
+    def test_external_x402_buyer_retries_temporary_payment_verification_failure(self):
+        from sign402_gateway.server import ExternalX402Buyer
+
+        policy_hash = "a" * 64
+        requirement = {
+            "network": "algorand-testnet",
+            "x402Network": "algorand:testnet",
+            "asset": "10458941",
+            "amountAtomic": "10000",
+            "receiver": "PAYEE",
+            "resource": "https://x402.goplausible.xyz/examples/weather",
+            "paymentIntent": "intent-retry-001",
+            "purpose": "x402_api_access",
+            "extra": {"name": "USDC", "decimals": 6},
+        }
+        firefly = Mock()
+        event_store = Mock()
+        agent_state_store = Mock()
+        agent_state_store.read_policy.return_value = {
+            "policy": {
+                "asset": "10458941",
+                "allowedPurpose": "x402_api_access",
+                "maxBudgetAtomic": "100000",
+                "maxPerPaymentAtomic": "10000",
+            },
+            "policyHash": policy_hash,
+            "firefly": {"approvedHash": policy_hash},
+        }
+        agent_state_store.remaining_budget.return_value = 90000
+        payment_signature_builder = Mock(return_value={"headerValue": "PAYMENT-SIGNATURE token"})
+
+        def approve_payment_hash(payment_hash, context_lines=None):
+            return {
+                "approved": True,
+                "approvedHash": payment_hash,
+                "deviceModel": 262,
+                "deviceSerial": 1056,
+            }
+
+        firefly.approve_payment_hash.side_effect = approve_payment_hash
+        buyer = ExternalX402Buyer(
+            firefly=firefly,
+            payment_signature_builder=payment_signature_builder,
+            event_store=event_store,
+            agent_state_store=agent_state_store,
+        )
+
+        with (
+            patch("sign402_gateway.server.fetch_x402_payment_required", return_value={"accepts": []}),
+            patch("sign402_gateway.server.normalize_x402_payment_required", return_value=requirement),
+            patch(
+                "sign402_gateway.server.fetch_x402_paid_resource",
+                side_effect=[
+                    {"status": 403, "error": "payment_verification_failed"},
+                    {
+                        "status": 200,
+                        "forecast": {"Tokyo": {"temperature": 55, "condition": "Clear"}},
+                        "paymentResponse": {"transaction": "TXID"},
+                    },
+                ],
+            ) as paid_fetch,
+            patch("sign402_gateway.server.time.sleep") as sleep,
+        ):
+            result = buyer("https://x402.goplausible.xyz/examples/weather")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["txId"], "TXID")
+        self.assertEqual(paid_fetch.call_count, 2)
+        sleep.assert_called_once_with(2.0)
+        firefly.approve_payment_hash.assert_called_once()
+        payment_signature_builder.assert_called_once()
+
 
 class AgentStateStoreTests(unittest.TestCase):
     def make_store(self):
