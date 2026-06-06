@@ -563,7 +563,7 @@ This keeps Firefly and private key material on the Mac. Hermes gets only approva
 Local demo launcher:
 
 ```bash
-cd "/Users/mp/Documents/Berlin Hack"
+cd x402HackBerlin
 bash scripts/start-local-demo.sh
 ```
 
@@ -581,13 +581,12 @@ If macOS blocks scripts or the virtualenv inside `Documents` with `Operation not
 3. Start a Cloudflare tunnel to 127.0.0.1:8099.
 ```
 
-The known working manual gateway command uses the system Python plus explicit import paths, avoiding the blocked virtualenv executable:
+Manual gateway launch:
 
 ```bash
-cd "/Users/mp/Documents/Berlin Hack/sign402-gateway"
-
-env FIREFLY_PORT=/dev/cu.usbmodem11301 SIGN402_GATEWAY_PORT=8099 \
-/opt/homebrew/opt/python@3.14/bin/python3.14 -c 'import sys; sys.path[:0]=["/Users/mp/Documents/Berlin Hack/payment-executor/.venv/lib/python3.14/site-packages","/Users/mp/Documents/Berlin Hack/sign402-gateway","/Users/mp/Documents/Berlin Hack/sign402-bridge","/Users/mp/Documents/Berlin Hack/live-demo","/Users/mp/Documents/Berlin Hack/payment-executor","/Users/mp/Documents/Berlin Hack/demo-resource-server"]; from sign402_gateway.server import main; main()'
+PYTHONPATH=sign402-gateway:sign402-bridge:payment-executor:live-demo:demo-resource-server \
+FIREFLY_PORT=/dev/cu.usbmodem11301 SIGN402_GATEWAY_PORT=8099 \
+python3 -m sign402_gateway
 ```
 
 For server-side Hermes short mode, expose only the Sign402 Gateway with a Cloudflare tunnel. The resource server stays local because the gateway calls it directly. A separate resource tunnel is optional for low-level protocol debugging.
@@ -780,10 +779,10 @@ Responsible for showing:
 
 Current dashboard implementation:
 
-- static file: `/Users/mp/Documents/Berlin Hack/demo-dashboard/index.html`;
+- static file: `demo-dashboard/index.html`;
 - polls `http://127.0.0.1:8099/events/latest` every 2 seconds;
 - falls back to the last embedded successful Telegram trace if the gateway is not running;
-- event data is stored locally at `/Users/mp/Documents/Berlin Hack/demo-dashboard/latest-run.json`.
+- event data is stored locally at `demo-dashboard/latest-run.json`.
 
 ## Policy Message Design
 
@@ -1161,7 +1160,7 @@ This is acceptable for the hackathon if the limitation is stated clearly:
 1. Presenter starts the local demo stack:
 
 ```bash
-cd "/Users/mp/Documents/Berlin Hack"
+cd x402HackBerlin
 bash scripts/start-local-demo.sh
 ```
 
@@ -1237,7 +1236,7 @@ The dashboard should be the main visual surface for judges. It should show the e
 Current static dashboard path:
 
 ```text
-/Users/mp/Documents/Berlin Hack/demo-dashboard/index.html
+demo-dashboard/index.html
 ```
 
 ## Implementation Strategy

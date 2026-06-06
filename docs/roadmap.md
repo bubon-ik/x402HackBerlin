@@ -64,13 +64,13 @@
 - [x] Confirm resource result:
   `reachable`
 - [x] Create static demo dashboard:
-  `/Users/mp/Documents/Berlin Hack/demo-dashboard/index.html`
+  `demo-dashboard/index.html`
 - [x] Add gateway event endpoint:
   `GET/POST /events/latest`
 - [x] Add dashboard polling against:
   `http://127.0.0.1:8099/events/latest`
 - [x] Add local demo launcher:
-  `/Users/mp/Documents/Berlin Hack/scripts/start-local-demo.sh`
+  `scripts/start-local-demo.sh`
 - [x] Fix replay issue by making resource server issue fresh pending payment intents.
 - [x] Add short UX endpoint:
   `POST /agent/buy-probe`
