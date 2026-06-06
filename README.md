@@ -24,11 +24,20 @@ Expose the gateway:
 cloudflared tunnel --url http://127.0.0.1:8099
 ```
 
-Give Hermes the tunnel URL, approve the policy on Firefly, then try:
+Give Hermes the tunnel URL, approve the policy on Firefly, then try the parameterized paid tools:
+
+```text
+buy weather for <city>
+buy qr for <url or text>
+```
+
+Examples:
 
 ```text
 buy weather for Dubai
-buy qr for https://github.com/bubon-ik/x402HackBerlin
+buy weather for Tokyo
+buy qr for https://example.com
+buy qr for text: Hello Berlin
 ```
 
 Expected proof:

@@ -98,7 +98,13 @@ Expected:
 
 ### 3. Buy Weather Resource
 
-In Telegram:
+In Telegram, use any city:
+
+```text
+buy weather for <city>
+```
+
+Example:
 
 ```text
 buy weather for Dubai
@@ -119,7 +125,7 @@ Expected:
 - The receipt includes a clickable Lora TestNet transaction link.
 - Dashboard updates automatically.
 
-Example:
+Example receipt:
 
 ```text
 ✅ Dubai Weather: 86°F, Sunny. Paid 0.01 USDC. Tx https://lora.algokit.io/testnet/transaction/<txId>. Budget left 0.91 USDC.
@@ -127,10 +133,18 @@ Example:
 
 ### 4. Buy QR Artifact
 
-In Telegram:
+In Telegram, use any URL or text payload:
+
+```text
+buy qr for <url or text>
+```
+
+Examples:
 
 ```text
 buy qr for https://github.com/bubon-ik/x402HackBerlin
+buy qr for https://example.com
+buy qr for text: Hello Berlin
 ```
 
 Expected:
@@ -142,7 +156,7 @@ Expected:
 - Gateway completes the real x402 USDC payment.
 - Gateway returns a compact receipt plus `qrImageUrl`.
 
-Example:
+Example receipt:
 
 ```text
 ✅ QR Code created for github.com/bubon-ik/x402HackBerlin. Paid 0.01 USDC. Tx https://lora.algokit.io/testnet/transaction/<txId>. Budget left <budget>.
@@ -178,7 +192,7 @@ This is documented in [SECURITY.md](SECURITY.md).
 Optional if time allows:
 
 - Disconnect Firefly or press cancel.
-- Run `buy weather for Dubai` again.
+- Run `buy weather for <city>` again.
 - Expected result: payment rejected, no Algorand transaction and no protected API response.
 
 Say:
