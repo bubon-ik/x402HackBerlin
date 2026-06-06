@@ -1,10 +1,20 @@
 # SingIt
 
-Hardware-approved x402 payments for agentic commerce on Algorand.
+[![Algorand](https://img.shields.io/badge/Algorand-TestNet%20%26%20MainNet-blue?style=flat-square&logo=algorand&logoColor=white)](https://algorand.co/)
+[![USDC](https://img.shields.io/badge/USDC-Payment%20Rail-green?style=flat-square)](https://www.circle.com/en/usdc)
+[![Quantoz EURD](https://img.shields.io/badge/Quantoz%20EURD-MainNet-blueviolet?style=flat-square)](https://quantozpay.com/)
+[![Firefly Hardware](https://img.shields.io/badge/Firefly-Hardware%20Approved-orange?style=flat-square)](https://github.com/algorand/firefly)
+[![Status](https://img.shields.io/badge/Status-Live%20Demo%20Ready-brightgreen?style=flat-square)](#what-judges-should-try)
 
-The project goal is to let an AI agent access paid x402-protected resources while keeping payment approval under explicit user control. The agent can request a purchase, but a local gateway and Firefly hardware approval step decide whether a real payment is allowed.
+SingIt lets AI agents pay for digital services without ever receiving wallet keys. A local gateway checks the request, Firefly requires human approval for the exact payment, and only then is a transaction submitted on Algorand.
 
-> x402 explains how agents pay. SingIt explains how humans safely authorize agents to pay.
+**Live demo proof:**
+
+- Weather and QR purchases settle through x402 with USDC on Algorand TestNet.
+- EURD payments settle as real ASA transfers on Algorand MainNet through the Quantoz rail.
+- Every payment requires physical Firefly approval, and SingIt receives only receipts, not private keys.
+
+> x402 explains how agents pay. SingIt shows how humans safely authorize those agents to pay.
 
 ## How It Works
 
@@ -26,13 +36,27 @@ flowchart LR
     K["Private keys stay local"] -.-> G
 ```
 
-- **TestNet rail:** SingIt buys weather data or QR generation through x402 using USDC on Algorand TestNet.
-- **MainNet rail:** SingIt sends EURD on Algorand MainNet through the optional Quantoz payment path.
+- **TestNet rail:** `goplausible.weather` and `sign402.qr` use x402 with USDC on Algorand TestNet.
+- **MainNet rail:** `quantoz.eurd.transfer` sends EURD on Algorand MainNet through the optional Quantoz path.
 - **Human control:** Firefly must approve the exact payment before the local gateway can submit it.
 
 ## What Judges Should Try
 
-Start the local demo stack:
+Once the local gateway tunnel is connected to SingIt, try three commands:
+
+```text
+buy weather for New York
+buy qr for https://github.com/bubon-ik/x402HackBerlin
+pay 0.01 EURD to <Algorand address>
+```
+
+Expected proof:
+
+- Firefly shows `x402 WEATHER`, `x402 QR CODE`, or `EURD PAYMENT` before money moves.
+- SingIt returns compact receipts with paid amount, transaction link, and remaining TestNet budget when applicable.
+- The agent never receives the Algorand private key.
+
+To run the local demo stack:
 
 ```bash
 cd x402HackBerlin
@@ -50,35 +74,19 @@ Expose the gateway:
 cloudflared tunnel --url http://127.0.0.1:8099
 ```
 
-Give SingIt the tunnel URL, approve the policy on Firefly, then try the parameterized paid tools:
+Give SingIt the tunnel URL and tell it to call the local gateway endpoints:
 
 ```text
-buy weather for <city>
-buy qr for <url or text>
+Use SingIt Gateway:
+https://<gateway-tunnel>.trycloudflare.com
+
+For TestNet paid tools, call POST /agent/buy-tool.
+For MainNet EURD, call POST /agent/pay-eurd.
+Return only telegramText for weather and EURD. For QR, include qrImageUrl.
+Never request private keys.
 ```
 
-Examples:
-
-```text
-buy weather for Dubai
-buy weather for Tokyo
-buy qr for https://example.com
-buy qr for text: Hello Berlin
-```
-
-Expected proof:
-
-- Firefly shows `x402 WEATHER` for weather and `x402 QR CODE` for QR.
-- SingIt returns compact receipts with paid amount, remaining budget, and clickable Lora transaction links.
-- The agent never receives the Algorand private key.
-
-Optional Quantoz proof, if the local mainnet EURD wallet env is configured:
-
-```text
-pay 0.01 EURD to <Algorand address>
-```
-
-This uses the same Firefly approval step, but settles a real EURD ASA transfer on Algorand MainNet.
+The EURD command requires the local MainNet wallet env configured with `QUANTOZ_WALLET_ENV`.
 
 ## Why This Matters
 
@@ -90,21 +98,6 @@ SingIt adds the missing consent layer:
 - **Payment control:** Firefly approves the exact payment commitment before the gateway executes it.
 - **Private-key isolation:** SingIt never receives the Algorand private key.
 - **Auditability:** every paid tool call has a policy hash, payment approval hash, tx id, amount, receiver, and remaining budget.
-
-## Live Proof
-
-The current demo buys the official GoPlausible weather API through x402 on Algorand TestNet USDC:
-
-```text
-Telegram command -> SingIt Gateway -> GoPlausible HTTP 402 -> Firefly approval
--> x402-avm PAYMENT-SIGNATURE -> Algorand settlement -> weather result
-```
-
-Example receipt:
-
-```text
-✅ Dubai Weather: 86°F, Sunny. Paid 0.01 USDC. Tx https://lora.algokit.io/testnet/transaction/MG34CK7NUARHJYB67BCCHYHTCT2JBY67CFRWBDVTSSETI3CGLIRA. Budget left 0.91 USDC.
-```
 
 ## Alignment With x402 Themes
 
@@ -160,17 +153,6 @@ curl -sS -X POST http://127.0.0.1:8099/agent/pay-eurd \
 ```
 
 Firefly displays `EURD PAYMENT`, the amount, and the receiver short address before the gateway submits the ASA transfer. SingIt should return only the `telegramText` receipt, which includes a mainnet Lora transaction link.
-
-## Planned Architecture
-
-```text
-SingIt Telegram agent
-  -> SingIt Gateway
-  -> Firefly approval layer
-  -> x402-avm payment executor
-  -> GoPlausible x402 resource
-  -> demo dashboard / audit trail
-```
 
 ## Repository Layout
 
@@ -246,14 +228,3 @@ Demo resource tests:
 ```bash
 PYTHONPATH=demo-resource-server python3 -m unittest discover -s demo-resource-server/tests
 ```
-
-## Demo Flow
-
-The intended demo flow:
-
-1. An agent discovers a paid x402 resource.
-2. The local gateway inspects the payment requirement.
-3. A human approves the exact payment through hardware.
-4. The executor submits the payment.
-5. The agent retries the protected request with proof of payment.
-6. The dashboard shows the approval and payment result.
