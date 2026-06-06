@@ -47,7 +47,12 @@ PAID_TOOLS: dict[str, dict[str, Any]] = {
         "mcpStyleName": "get_weather",
         "inputSchema": {
             "type": "object",
-            "properties": {},
+            "properties": {
+                "city": {
+                    "type": "string",
+                    "description": "Optional city to display in the weather receipt, e.g. Tokyo.",
+                }
+            },
             "required": [],
         },
     }
@@ -265,7 +270,7 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
             tool = _resolve_paid_tool(payload)
             policy_hash = self._policy_hash_from_payload_or_state(payload)
             inspection = self.server.x402_inspector(str(tool["resourceUrl"]), policy_hash)
-            result = _tool_result(tool, inspection)
+            result = _tool_result(tool, inspection, _tool_request_context(payload))
             result["nextStep"] = "If acceptable, POST /agent/buy-tool with the same tool id. Firefly approval is required before payment."
             self._send_json(result)
         except Exception as exc:
@@ -280,7 +285,7 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
             payload = self._read_json()
             tool = _resolve_paid_tool(payload)
             result = self.server.x402_buyer(str(tool["resourceUrl"]))
-            enriched = _tool_result(tool, result)
+            enriched = _tool_result(tool, result, _tool_request_context(payload))
             enriched["decision"] = result.get("decision", "approved_and_executed")
             enriched["ok"] = bool(result.get("ok", False))
             if enriched.get("ok"):
@@ -978,8 +983,21 @@ def _resolve_paid_tool(payload: dict[str, Any]) -> dict[str, Any]:
     return dict(tool)
 
 
-def _tool_result(tool: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+def _tool_request_context(payload: dict[str, Any]) -> dict[str, Any]:
+    city = str(payload.get("city") or payload.get("location") or "").strip()
+    context: dict[str, Any] = {}
+    if city:
+        context["city"] = city
+    return context
+
+
+def _tool_result(
+    tool: dict[str, Any],
+    payload: dict[str, Any],
+    request_context: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     result = dict(payload)
+    request_context = request_context or {}
     result["tool"] = {
         "id": tool["id"],
         "name": tool["name"],
@@ -994,7 +1012,106 @@ def _tool_result(tool: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any
     result["toolName"] = tool["name"]
     result["command"] = tool["command"]
     result["mode"] = "paid_tool_" + str(payload.get("mode", "x402"))
+    result.update(request_context)
+    summary = _tool_summary(tool, result, request_context)
+    if summary:
+        result["summary"] = summary
+        result["telegramText"] = _telegram_text(summary)
     return result
+
+
+def _tool_summary(
+    tool: dict[str, Any],
+    result: dict[str, Any],
+    request_context: dict[str, Any],
+) -> dict[str, Any] | None:
+    if tool.get("id") != "goplausible.weather" or not result.get("ok"):
+        return None
+
+    city = request_context.get("city")
+    resource_result = result.get("resourceResult")
+    weather = _weather_for_city(resource_result if isinstance(resource_result, dict) else {}, city)
+    title = f"{city} Weather" if city else "Weather"
+    amount = _format_tool_amount(result.get("amountAtomic"), result.get("asset"), result)
+    remaining_budget = _format_tool_amount(
+        result.get("remainingBudgetAtomic"),
+        result.get("asset"),
+        result,
+    )
+    tx_id = str(result.get("txId") or "")
+
+    summary = {
+        "title": title,
+        "status": str(result.get("decision", "approved_and_executed")),
+        "amount": amount,
+        "remainingBudget": remaining_budget,
+        "txId": tx_id,
+    }
+    if city:
+        summary["city"] = city
+    if weather:
+        summary.update(weather)
+    return summary
+
+
+def _weather_for_city(resource_result: dict[str, Any], city: str | None) -> dict[str, str]:
+    forecast = resource_result.get("forecast")
+    weather: Any = None
+    if city and isinstance(forecast, dict):
+        city_lookup = city.lower()
+        for forecast_city, forecast_value in forecast.items():
+            if str(forecast_city).lower() == city_lookup:
+                weather = forecast_value
+                break
+    if weather is None:
+        weather = resource_result
+    if not isinstance(weather, dict):
+        return {}
+
+    summary: dict[str, str] = {}
+    if "temperature" in weather:
+        temperature = str(weather["temperature"])
+        summary["temperature"] = temperature if temperature.endswith("°F") else f"{temperature}°F"
+    if "condition" in weather:
+        summary["condition"] = str(weather["condition"])
+    if "humidity" in weather:
+        summary["humidity"] = str(weather["humidity"])
+    if "wind" in weather:
+        summary["wind"] = str(weather["wind"])
+    return summary
+
+
+def _format_tool_amount(amount_atomic: Any, asset: Any, result: dict[str, Any]) -> str:
+    if amount_atomic is None:
+        return ""
+    extra: dict[str, Any] = {}
+    requirement = result.get("paymentRequirements")
+    if isinstance(requirement, dict) and isinstance(requirement.get("extra"), dict):
+        extra = requirement["extra"]
+    return _format_display_amount(
+        {
+            "amountAtomic": amount_atomic,
+            "asset": asset,
+            "extra": extra,
+        }
+    )
+
+
+def _telegram_text(summary: dict[str, Any]) -> str:
+    title = summary["title"]
+    weather_bits = [
+        str(summary[key])
+        for key in ("temperature", "condition")
+        if summary.get(key)
+    ]
+    weather_text = ": " + ", ".join(weather_bits) if weather_bits else ""
+    tx_id = str(summary.get("txId", ""))
+    return (
+        f"✅ {title}{weather_text}. "
+        f"Paid {summary.get('amount', '')}. "
+        f"Tx {tx_id}. "
+        f"Budget left {summary.get('remainingBudget', '')}."
+    )
 
 
 def _busy_payload() -> dict[str, Any]:

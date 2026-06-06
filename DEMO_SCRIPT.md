@@ -39,8 +39,10 @@ https://<gateway-tunnel>.trycloudflare.com
 
 For policy approval, call POST /approve-policy.
 For listing paid tools, call GET /agent/tools.
-Before buying GoPlausible weather, call POST /agent/inspect-tool with {"tool":"goplausible.weather"}.
-For buying GoPlausible weather, call POST /agent/buy-tool with {"tool":"goplausible.weather"}.
+Before buying weather, call POST /agent/inspect-tool with {"tool":"goplausible.weather"}.
+When I say "buy weather for <city>", call POST /agent/buy-tool with {"tool":"goplausible.weather","city":"<city>"}.
+When I say "buy weather" without a city, call POST /agent/buy-tool with {"tool":"goplausible.weather"}.
+After buying, reply using the gateway's telegramText field only.
 Do not build the x402 payment yourself. Do not ask for private keys. Only call the Sign402 Gateway.
 ```
 
@@ -89,7 +91,7 @@ Expected:
 In Telegram:
 
 ```text
-buy goplausible weather
+buy weather for Tokyo
 ```
 
 Expected:
@@ -103,7 +105,7 @@ Expected:
 - Gateway creates official `x402-avm` `PAYMENT-SIGNATURE`.
 - GoPlausible facilitator settles the Algorand TestNet USDC payment.
 - GoPlausible returns protected weather JSON.
-- Hermes replies with decision, tx id, policy hash, payment hash, weather result, and remaining budget.
+- Hermes replies with the compact `telegramText` receipt only.
 - Dashboard updates automatically.
 
 ### 4. Point To The Audit Trail

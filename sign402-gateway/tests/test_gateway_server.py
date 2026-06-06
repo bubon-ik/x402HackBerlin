@@ -346,6 +346,54 @@ class GatewayServerTests(unittest.TestCase):
             "ok": True,
             "resourceUrl": "https://x402.goplausible.xyz/examples/weather",
             "txId": "TXID",
+            "amountAtomic": "10000",
+            "asset": "10458941",
+            "remainingBudgetAtomic": "990000",
+            "resourceResult": {
+                "temperature": "55°F",
+                "condition": "Clear",
+            },
+        }
+
+        with patch("sys.stderr", io.StringIO()):
+            handler = self.make_handler(
+                "/agent/buy-tool",
+                {"tool": "get_weather", "city": "Tokyo"},
+            )
+
+        response = self.response_text(handler)
+
+        self.assertIn("HTTP/1.0 200 OK", response)
+        self.assertIn('"decision": "approved_and_executed"', response)
+        self.assertIn('"toolName": "GoPlausible Weather"', response)
+        self.assertIn('"city": "Tokyo"', response)
+        self.assertIn('"title": "Tokyo Weather"', response)
+        self.assertIn('"telegramText": "✅ Tokyo Weather: 55°F, Clear. Paid 0.01 USDC. Tx TXID. Budget left 0.99 USDC."', response)
+        DummyServer.x402_buyer.assert_called_once_with(
+            "https://x402.goplausible.xyz/examples/weather"
+        )
+        DummyServer.event_store.write.assert_called_once()
+        saved_event = DummyServer.event_store.write.call_args.args[0]
+        self.assertEqual(saved_event["toolId"], "goplausible.weather")
+        self.assertEqual(saved_event["command"], "buy goplausible weather")
+        self.assertEqual(saved_event["city"], "Tokyo")
+        self.assertEqual(saved_event["summary"]["title"], "Tokyo Weather")
+
+    def test_agent_buy_tool_summary_allows_missing_city(self):
+        DummyServer.x402_buyer.reset_mock()
+        DummyServer.event_store.reset_mock()
+        DummyServer.x402_buyer.return_value = {
+            "decision": "approved_and_executed",
+            "ok": True,
+            "resourceUrl": "https://x402.goplausible.xyz/examples/weather",
+            "txId": "TXID",
+            "amountAtomic": "10000",
+            "asset": "10458941",
+            "remainingBudgetAtomic": "990000",
+            "resourceResult": {
+                "temperature": "55°F",
+                "condition": "Clear",
+            },
         }
 
         with patch("sys.stderr", io.StringIO()):
@@ -354,15 +402,8 @@ class GatewayServerTests(unittest.TestCase):
         response = self.response_text(handler)
 
         self.assertIn("HTTP/1.0 200 OK", response)
-        self.assertIn('"decision": "approved_and_executed"', response)
-        self.assertIn('"toolName": "GoPlausible Weather"', response)
-        DummyServer.x402_buyer.assert_called_once_with(
-            "https://x402.goplausible.xyz/examples/weather"
-        )
-        DummyServer.event_store.write.assert_called_once()
-        saved_event = DummyServer.event_store.write.call_args.args[0]
-        self.assertEqual(saved_event["toolId"], "goplausible.weather")
-        self.assertEqual(saved_event["command"], "buy goplausible weather")
+        self.assertIn('"title": "Weather"', response)
+        self.assertIn('"telegramText": "✅ Weather: 55°F, Clear. Paid 0.01 USDC. Tx TXID. Budget left 0.99 USDC."', response)
 
     def test_external_x402_buyer_sends_human_payment_context_to_firefly(self):
         from sign402_gateway.server import ExternalX402Buyer
