@@ -612,7 +612,6 @@ POST /approve-policy
 POST /approve-payment
 POST /execute-payment
 GET  /events/latest
-POST /events/latest
 POST /agent/buy-probe
 GET  /agent/tools
 POST /agent/inspect-tool

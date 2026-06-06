@@ -42,7 +42,6 @@ POST /approve-policy
 POST /approve-payment
 POST /execute-payment
 GET  /events/latest
-POST /events/latest
 POST /agent/buy-probe
 GET  /agent/tools
 POST /agent/inspect-tool
@@ -206,37 +205,7 @@ The dashboard polls the gateway for the latest safe run event:
 GET /events/latest
 ```
 
-In the main short-mode demo, `/agent/buy-probe` writes this event automatically.
-
-For low-level debugging, a client can update the dashboard manually after a completed flow:
-
-```bash
-curl -X POST http://127.0.0.1:8099/events/latest \
-  -H "Content-Type: application/json" \
-  -d '{
-    "event": {
-      "decision": "APPROVED & EXECUTED",
-      "policyHash": "<64 hex chars>",
-      "paymentApprovalHash": "<64 hex chars>",
-      "txId": "<algorand tx id>",
-      "resource": "/probe?target=algorand.co",
-      "paymentIntent": "intent-001",
-      "amountAtomic": "50000",
-      "asset": "ALGO_TEST",
-      "network": "algorand-testnet",
-      "deviceModel": 262,
-      "deviceSerial": 1056,
-      "remainingBudgetAtomic": "950000",
-      "resourceResult": {
-        "target": "algorand.co",
-        "location": "Berlin",
-        "httpStatus": 200,
-        "latencyMs": 42,
-        "result": "reachable"
-      }
-    }
-  }'
-```
+Successful gateway flows write this event internally. External HTTP clients cannot overwrite dashboard events.
 
 The default event store is:
 
@@ -249,5 +218,5 @@ demo-dashboard/latest-run.json
 - The gateway reads the Algorand private key from the local `payment-executor/.env`.
 - The private key is never returned over HTTP.
 - Hermes receives only payment metadata and `txId`.
-- If Firefly approval fails, Hermes must not call `/execute-payment`.
+- `/execute-payment` recomputes the payment commitment, enforces the stored policy, and consumes a one-time Firefly approval before execution.
 - Dashboard events must contain only safe metadata, never private keys or mnemonics.

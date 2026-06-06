@@ -68,7 +68,7 @@
 - [x] Create static demo dashboard:
   `demo-dashboard/index.html`
 - [x] Add gateway event endpoint:
-  `GET/POST /events/latest`
+  `GET /events/latest`
 - [x] Add dashboard polling against:
   `http://127.0.0.1:8099/events/latest`
 - [x] Add local demo launcher:
@@ -124,7 +124,7 @@ We have a working official x402 paid-tool demo:
   - `GET /agent/tools`
   - `POST /agent/inspect-tool`
   - `POST /agent/buy-tool`
-  - `GET/POST /events/latest`
+  - `GET /events/latest`
 - The x402 demo resource server returns `402 Payment Required` with a fresh `paymentIntent` for each unpaid request.
 - The payment executor sends real Algorand TestNet payments.
 - Hermes Telegram has completed live official GoPlausible weather purchases through `/agent/buy-tool`.
@@ -253,7 +253,7 @@ The local demo resource server remains available for regression and backup demos
 
 Polish the **official GoPlausible paid-tool dashboard** after the core pitch flow is stable.
 
-The gateway now writes `GET/POST /events/latest`, and the dashboard polls it. The main demo path is:
+The gateway writes dashboard events internally, and the dashboard polls `GET /events/latest`. The main demo path is:
 
 ```text
 Telegram command -> gateway /agent/buy-tool -> GoPlausible 402 -> USDC policy check -> Firefly payment approval -> x402-avm PAYMENT-SIGNATURE -> GoPlausible facilitator settlement -> protected weather JSON -> compact Telegram receipt -> gateway event -> dashboard updates
@@ -282,7 +282,6 @@ POST /approve-policy
 POST /approve-payment
 POST /execute-payment
 GET  /events/latest
-POST /events/latest
 POST /agent/buy-probe
 ```
 

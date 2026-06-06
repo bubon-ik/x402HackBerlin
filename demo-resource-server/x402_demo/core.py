@@ -83,7 +83,7 @@ def verify_payment_proof(
     if proof.get("verificationMode") == "algorand":
         return verify_algorand_payment_proof(proof, requirement)
 
-    return {"ok": True}
+    return {"ok": False, "reason": "verificationMode must be algorand"}
 
 
 def build_probe_result(target: str, payment_proof: dict[str, Any]) -> dict[str, Any]:

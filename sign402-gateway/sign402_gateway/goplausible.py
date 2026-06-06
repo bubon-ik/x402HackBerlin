@@ -39,18 +39,23 @@ def fetch_x402_payment_required(
                 f"Expected x402 resource to return HTTP 402, got HTTP {response.status}."
             )
     except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8")
-        if exc.code != 402:
-            raise ValueError(f"Expected HTTP 402 from x402 resource, got HTTP {exc.code}: {body}")
-        header_payload = exc.headers.get("Payment-Required")
-        if header_payload:
-            payload = _decode_payment_required_header(header_payload)
-        else:
-            payload = json.loads(body)
-        if not isinstance(payload, dict):
-            raise ValueError("x402 402 response must be a JSON object")
-        payload.setdefault("status", 402)
-        return payload
+        try:
+            body = exc.read().decode("utf-8")
+            if exc.code != 402:
+                raise ValueError(
+                    f"Expected HTTP 402 from x402 resource, got HTTP {exc.code}: {body}"
+                )
+            header_payload = exc.headers.get("Payment-Required")
+            if header_payload:
+                payload = _decode_payment_required_header(header_payload)
+            else:
+                payload = json.loads(body)
+            if not isinstance(payload, dict):
+                raise ValueError("x402 402 response must be a JSON object")
+            payload.setdefault("status", 402)
+            return payload
+        finally:
+            exc.close()
 
 
 def fetch_x402_paid_resource(
@@ -80,15 +85,18 @@ def fetch_x402_paid_resource(
                 payload["paymentResponse"] = _decode_payment_required_header(payment_response)
             return payload
     except urllib.error.HTTPError as exc:
-        body = exc.read().decode("utf-8")
-        payload = json.loads(body) if body else {}
-        if not isinstance(payload, dict):
-            payload = {"body": payload}
-        payload.setdefault("status", exc.code)
-        payment_response = exc.headers.get("Payment-Response")
-        if payment_response:
-            payload["paymentResponse"] = _decode_payment_required_header(payment_response)
-        return payload
+        try:
+            body = exc.read().decode("utf-8")
+            payload = json.loads(body) if body else {}
+            if not isinstance(payload, dict):
+                payload = {"body": payload}
+            payload.setdefault("status", exc.code)
+            payment_response = exc.headers.get("Payment-Response")
+            if payment_response:
+                payload["paymentResponse"] = _decode_payment_required_header(payment_response)
+            return payload
+        finally:
+            exc.close()
 
 
 def normalize_x402_payment_required(
@@ -154,17 +162,29 @@ def _extract_payment_requirement(payload: dict[str, Any]) -> dict[str, Any]:
     if isinstance(requirement, list):
         if not requirement:
             raise ValueError("paymentRequirements list is empty")
-        requirement = requirement[0]
+        requirement = _select_algorand_requirement(requirement)
 
     accepts = payload.get("accepts")
     if requirement is None and isinstance(accepts, list):
         if not accepts:
             raise ValueError("accepts list is empty")
-        requirement = accepts[0]
+        requirement = _select_algorand_requirement(accepts)
 
     if not isinstance(requirement, dict):
         raise ValueError("x402 response must contain paymentRequirements or accepts[0]")
     return requirement
+
+
+def _select_algorand_requirement(options: list[Any]) -> Any:
+    candidates = [option for option in options if isinstance(option, dict)]
+    for option in candidates:
+        network = str(option.get("network", ""))
+        if NETWORK_ALIASES.get(network) == "algorand-testnet":
+            return option
+    for option in candidates:
+        if str(option.get("network", "")) in NETWORK_ALIASES:
+            return option
+    return candidates[0] if candidates else None
 
 
 def _decode_payment_required_header(header_value: str) -> dict[str, Any]:

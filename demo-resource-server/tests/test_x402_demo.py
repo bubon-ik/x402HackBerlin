@@ -1,6 +1,7 @@
 import base64
 import json
 import unittest
+from unittest.mock import patch
 
 from x402_demo.core import (
     PAYMENT_PRICE,
@@ -38,7 +39,7 @@ class X402DemoTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             parse_payment_proof("not valid base64")
 
-    def test_verify_payment_proof_accepts_matching_requirement(self):
+    def test_verify_payment_proof_rejects_matching_but_unverified_payload(self):
         requirement = build_payment_required("algorand.co")["paymentRequirements"]
         proof = {
             "txId": "TEST_TX",
@@ -53,7 +54,31 @@ class X402DemoTests(unittest.TestCase):
 
         result = verify_payment_proof(proof, requirement, used_intents=set())
 
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["reason"], "verificationMode must be algorand")
+
+    def test_verify_payment_proof_uses_algorand_verifier(self):
+        requirement = build_payment_required("algorand.co")["paymentRequirements"]
+        proof = {
+            "verificationMode": "algorand",
+            "txId": "TEST_TX",
+            "network": "algorand-testnet",
+            "receiver": requirement["receiver"],
+            "amountAtomic": requirement["amountAtomic"],
+            "asset": requirement["asset"],
+            "resource": requirement["resource"],
+            "paymentIntent": requirement["paymentIntent"],
+            "policyHash": "a" * 64,
+        }
+
+        with patch(
+            "x402_demo.core.verify_algorand_payment_proof",
+            return_value={"ok": True, "confirmedRound": 123},
+        ) as verifier:
+            result = verify_payment_proof(proof, requirement, used_intents=set())
+
         self.assertTrue(result["ok"])
+        verifier.assert_called_once_with(proof, requirement)
 
     def test_verify_payment_proof_rejects_replay(self):
         requirement = build_payment_required("algorand.co")["paymentRequirements"]

@@ -1,4 +1,5 @@
 import argparse
+import ipaddress
 import json
 import os
 import re
@@ -34,6 +35,8 @@ from x402_demo.core import encode_payment_proof
 from .goplausible import fetch_x402_paid_resource, fetch_x402_payment_required, normalize_x402_payment_required
 
 HEX_32_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+MAX_REQUEST_BODY_BYTES = 64 * 1024
+MAX_QR_DATA_CHARS = 2048
 
 
 PAID_TOOLS: dict[str, dict[str, Any]] = {
@@ -158,9 +161,6 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
         if path == "/execute-payment":
             self._handle_execute_payment()
             return
-        if path == "/events/latest":
-            self._handle_post_latest_event()
-            return
         if path == "/agent/buy-probe":
             self._handle_agent_buy_probe()
             return
@@ -236,6 +236,9 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
             if approval.get("approved") and approval["approvedHash"] != payment_hash:
                 raise ValueError("Firefly approved hash does not match payment hash.")
 
+            if approval.get("approved"):
+                self.server.agent_state_store.record_payment_approval(payment_hash, approval)
+
             self._send_json(
                 {
                     "approved": bool(approval.get("approved")),
@@ -257,7 +260,41 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
             requirement = payload["paymentRequirements"]
             _validate_payment_requirements(requirement)
 
+            expected_approval_hash = build_payment_commitment(
+                requirement,
+                policy_hash,
+            )["paymentHash"]
+            if payment_approval_hash != expected_approval_hash:
+                raise ValueError(
+                    "paymentApprovalHash does not match payment commitment"
+                )
+
+            policy_state = self.server.agent_state_store.read_policy()
+            if policy_state is None:
+                raise ValueError("No Firefly-approved policy stored. Call /approve-policy first.")
+            policy = policy_state["policy"]
+            approved_policy_hash = str(policy_state["firefly"]["approvedHash"]).lower()
+            if approved_policy_hash != policy_hash:
+                raise ValueError("Stored policy hash does not match Firefly approval.")
+
+            self.server.agent_state_store.validate_policy_allows(
+                policy,
+                policy_hash,
+                requirement,
+            )
+            if not self.server.agent_state_store.consume_payment_approval(
+                payment_approval_hash
+            ):
+                raise ValueError(
+                    "No unused Firefly approval for paymentApprovalHash"
+                )
+
             payment = self.server.payment_executor(requirement, policy_hash)
+            self.server.agent_state_store.record_payment(
+                policy_hash,
+                str(requirement["paymentIntent"]),
+                int(str(requirement["amountAtomic"])),
+            )
             self._send_json(
                 {
                     "ok": True,
@@ -272,17 +309,6 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
     def _handle_get_latest_event(self) -> None:
         event = self.server.event_store.read()
         self._send_json({"ok": event is not None, "event": event})
-
-    def _handle_post_latest_event(self) -> None:
-        try:
-            payload = self._read_json()
-            event = payload.get("event", payload)
-            if not isinstance(event, dict):
-                raise ValueError("event must be an object")
-            saved_event = self.server.event_store.write(event)
-            self._send_json({"ok": True, "event": saved_event})
-        except Exception as exc:
-            self._send_json({"ok": False, "error": str(exc)}, status=400)
 
     def _handle_agent_buy_probe(self) -> None:
         if not self._acquire_firefly():
@@ -362,6 +388,7 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
             resource_url = str(payload.get("url", "")).strip()
             if not resource_url:
                 raise ValueError("url is required")
+            _validate_external_resource_url(resource_url)
 
             policy_hash = self._policy_hash_from_payload_or_state(payload)
             result = self.server.x402_inspector(resource_url, policy_hash)
@@ -379,6 +406,7 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
             resource_url = str(payload.get("url", "")).strip()
             if not resource_url:
                 raise ValueError("url is required")
+            _validate_external_resource_url(resource_url)
 
             result = self.server.x402_buyer(resource_url)
             self._send_json(result)
@@ -401,6 +429,10 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
 
     def _read_json(self) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length", "0"))
+        if length < 0:
+            raise ValueError("Content-Length must not be negative")
+        if length > MAX_REQUEST_BODY_BYTES:
+            raise ValueError("request body is too large")
         body = self.rfile.read(length)
         if not body:
             raise ValueError("request body is empty")
@@ -872,9 +904,46 @@ class AgentStateStore:
                 "policyApproval": policy_approval,
                 "spentAtomic": "0",
                 "usedPaymentIntents": [],
+                "approvedPaymentHashes": {},
             }
             self._write_state_unlocked(state)
             return policy_approval
+
+    def record_payment_approval(
+        self,
+        payment_hash: str,
+        approval: dict[str, Any],
+    ) -> None:
+        with self.lock:
+            state = self._read_state_unlocked()
+            approved_hashes = state.get("approvedPaymentHashes", {})
+            if not isinstance(approved_hashes, dict):
+                approved_hashes = {}
+            approved_hashes[payment_hash.lower()] = {
+                "approvedHash": str(approval.get("approvedHash", "")).lower(),
+                "deviceModel": approval.get("deviceModel"),
+                "deviceSerial": approval.get("deviceSerial"),
+            }
+            state["approvedPaymentHashes"] = approved_hashes
+            self._write_state_unlocked(state)
+
+    def consume_payment_approval(self, payment_hash: str) -> bool:
+        with self.lock:
+            state = self._read_state_unlocked()
+            approved_hashes = state.get("approvedPaymentHashes", {})
+            if not isinstance(approved_hashes, dict):
+                return False
+
+            approval = approved_hashes.get(payment_hash.lower())
+            if not isinstance(approval, dict):
+                return False
+            if str(approval.get("approvedHash", "")).lower() != payment_hash.lower():
+                return False
+
+            del approved_hashes[payment_hash.lower()]
+            state["approvedPaymentHashes"] = approved_hashes
+            self._write_state_unlocked(state)
+            return True
 
     def validate_policy_allows(
         self,
@@ -893,6 +962,8 @@ class AgentStateStore:
         used_intents = set(state.get("usedPaymentIntents", []))
         payment_intent = str(requirement["paymentIntent"])
 
+        if str(requirement.get("network")) != "algorand-testnet":
+            raise ValueError("Only algorand-testnet payments are allowed")
         if payment_intent in used_intents:
             raise ValueError("paymentIntent already used")
         if amount > max_per_payment:
@@ -1076,12 +1147,40 @@ def _tool_request_context(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 def _validate_tool_request(tool: dict[str, Any], request_context: dict[str, Any]) -> None:
-    if tool.get("id") == "sign402.qr" and not request_context.get("qrData"):
+    if tool.get("id") != "sign402.qr":
+        return
+    qr_data = str(request_context.get("qrData") or "")
+    if not qr_data:
         raise ValueError("qr tool requires url, text, data, or target")
+    if len(qr_data) > MAX_QR_DATA_CHARS:
+        raise ValueError(
+            f"qr payload must be at most {MAX_QR_DATA_CHARS} characters"
+        )
 
 
 def _tool_payment_resource_url(tool: dict[str, Any]) -> str:
     return str(tool.get("paymentResourceUrl") or tool["resourceUrl"])
+
+
+def _validate_external_resource_url(resource_url: str) -> None:
+    parsed = urlparse(resource_url)
+    if parsed.scheme.lower() != "https":
+        raise ValueError("external x402 resource URL must use https")
+    if parsed.username or parsed.password:
+        raise ValueError("external x402 resource URL must not include credentials")
+
+    hostname = (parsed.hostname or "").lower().rstrip(".")
+    if not hostname:
+        raise ValueError("external x402 resource URL must include a hostname")
+    if hostname == "localhost" or hostname.endswith((".localhost", ".local")):
+        raise ValueError("external x402 resource URL must not target localhost")
+
+    try:
+        address = ipaddress.ip_address(hostname)
+    except ValueError:
+        return
+    if not address.is_global:
+        raise ValueError("external x402 resource URL must use a public IP address")
 
 
 def _agent_manifest() -> dict[str, Any]:

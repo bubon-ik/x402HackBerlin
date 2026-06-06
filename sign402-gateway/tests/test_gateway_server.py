@@ -94,6 +94,7 @@ class GatewayServerTests(unittest.TestCase):
         payment_hash = "b" * 64
         DummyServer.firefly.reset_mock()
         DummyServer.payment_executor.reset_mock()
+        DummyServer.agent_state_store.reset_mock()
         DummyServer.firefly_busy = False
         DummyServer.firefly.approve_payment_hash.return_value = {
             "approved": True,
@@ -116,6 +117,10 @@ class GatewayServerTests(unittest.TestCase):
         DummyServer.firefly.approve_payment_hash.assert_called_once_with(
             payment_hash,
             context_lines=["x402 PAYMENT", "sign402 approval"],
+        )
+        DummyServer.agent_state_store.record_payment_approval.assert_called_once_with(
+            payment_hash,
+            DummyServer.firefly.approve_payment_hash.return_value,
         )
         DummyServer.payment_executor.assert_not_called()
 
@@ -161,8 +166,9 @@ class GatewayServerTests(unittest.TestCase):
         self.assertEqual(stored["firefly"]["approvedHash"], policy_hash)
 
     def test_execute_payment_uses_local_executor_without_exposing_secrets(self):
+        from sign402_live.flow import build_payment_commitment
+
         policy_hash = "a" * 64
-        approval_hash = "b" * 64
         requirement = {
             "network": "algorand-testnet",
             "asset": "ALGO_TEST",
@@ -172,8 +178,23 @@ class GatewayServerTests(unittest.TestCase):
             "paymentIntent": "intent-001",
             "purpose": "x402_api_access",
         }
+        approval_hash = build_payment_commitment(requirement, policy_hash)["paymentHash"]
+        policy = {
+            "asset": "ALGO_TEST",
+            "allowedPurpose": "x402_api_access",
+            "maxBudgetAtomic": "100000",
+            "maxPerPaymentAtomic": "50000",
+        }
         DummyServer.firefly.reset_mock()
         DummyServer.payment_executor.reset_mock()
+        DummyServer.agent_state_store.reset_mock()
+        DummyServer.agent_state_store.read_policy.return_value = {
+            "policy": policy,
+            "policyHash": policy_hash,
+            "firefly": {"approvedHash": policy_hash},
+        }
+        DummyServer.agent_state_store.consume_payment_approval.return_value = True
+        DummyServer.agent_state_store.remaining_budget.return_value = 50000
         DummyServer.payment_executor.return_value = {
             "txId": "TXID",
             "network": "algorand-testnet",
@@ -202,7 +223,96 @@ class GatewayServerTests(unittest.TestCase):
         self.assertIn('"txId": "TXID"', response)
         self.assertNotIn("private", response.lower())
         self.assertNotIn("mnemonic", response.lower())
+        DummyServer.agent_state_store.validate_policy_allows.assert_called_once_with(
+            policy,
+            policy_hash,
+            requirement,
+        )
+        DummyServer.agent_state_store.consume_payment_approval.assert_called_once_with(
+            approval_hash
+        )
+        DummyServer.agent_state_store.record_payment.assert_called_once_with(
+            policy_hash,
+            "intent-001",
+            50000,
+        )
         DummyServer.payment_executor.assert_called_once_with(requirement, policy_hash)
+
+    def test_execute_payment_rejects_hash_not_bound_to_requirements(self):
+        policy_hash = "a" * 64
+        requirement = {
+            "network": "algorand-testnet",
+            "asset": "ALGO_TEST",
+            "amountAtomic": "50000",
+            "receiver": "MERCHANT",
+            "resource": "/probe?target=algorand.co",
+            "paymentIntent": "intent-001",
+            "purpose": "x402_api_access",
+        }
+        DummyServer.payment_executor.reset_mock()
+        DummyServer.agent_state_store.reset_mock()
+
+        with patch("sys.stderr", io.StringIO()):
+            handler = self.make_handler(
+                "/execute-payment",
+                {
+                    "policyHash": policy_hash,
+                    "paymentApprovalHash": "b" * 64,
+                    "paymentRequirements": requirement,
+                },
+            )
+
+        response = self.response_text(handler)
+
+        self.assertIn("HTTP/1.0 400 Bad Request", response)
+        self.assertIn("does not match payment commitment", response)
+        DummyServer.agent_state_store.consume_payment_approval.assert_not_called()
+        DummyServer.payment_executor.assert_not_called()
+
+    def test_execute_payment_rejects_missing_or_consumed_firefly_approval(self):
+        from sign402_live.flow import build_payment_commitment
+
+        policy_hash = "a" * 64
+        requirement = {
+            "network": "algorand-testnet",
+            "asset": "ALGO_TEST",
+            "amountAtomic": "50000",
+            "receiver": "MERCHANT",
+            "resource": "/probe?target=algorand.co",
+            "paymentIntent": "intent-001",
+            "purpose": "x402_api_access",
+        }
+        approval_hash = build_payment_commitment(requirement, policy_hash)["paymentHash"]
+        policy = {
+            "asset": "ALGO_TEST",
+            "allowedPurpose": "x402_api_access",
+            "maxBudgetAtomic": "100000",
+            "maxPerPaymentAtomic": "50000",
+        }
+        DummyServer.payment_executor.reset_mock()
+        DummyServer.agent_state_store.reset_mock()
+        DummyServer.agent_state_store.read_policy.return_value = {
+            "policy": policy,
+            "policyHash": policy_hash,
+            "firefly": {"approvedHash": policy_hash},
+        }
+        DummyServer.agent_state_store.consume_payment_approval.return_value = False
+
+        with patch("sys.stderr", io.StringIO()):
+            handler = self.make_handler(
+                "/execute-payment",
+                {
+                    "policyHash": policy_hash,
+                    "paymentApprovalHash": approval_hash,
+                    "paymentRequirements": requirement,
+                },
+            )
+
+        response = self.response_text(handler)
+
+        self.assertIn("HTTP/1.0 400 Bad Request", response)
+        self.assertIn("No unused Firefly approval", response)
+        DummyServer.payment_executor.assert_not_called()
 
     def test_execute_payment_rejects_invalid_hash_before_executor(self):
         DummyServer.payment_executor.reset_mock()
@@ -229,7 +339,7 @@ class GatewayServerTests(unittest.TestCase):
         self.assertIn("HTTP/1.0 400 Bad Request", response)
         DummyServer.payment_executor.assert_not_called()
 
-    def test_events_latest_can_be_written_and_read(self):
+    def test_events_latest_can_be_read(self):
         event = {
             "decision": "APPROVED & EXECUTED",
             "policyHash": "a" * 64,
@@ -241,19 +351,28 @@ class GatewayServerTests(unittest.TestCase):
         DummyServer.event_store.read.return_value = event
 
         with patch("sys.stderr", io.StringIO()):
-            post_handler = self.make_handler("/events/latest", {"event": event})
             get_handler = self.make_handler("/events/latest", method="GET")
 
-        post_response = self.response_text(post_handler)
         get_response = self.response_text(get_handler)
 
-        self.assertIn("HTTP/1.0 200 OK", post_response)
-        self.assertIn('"ok": true', post_response)
-        self.assertIn("Access-Control-Allow-Origin: *", post_response)
         self.assertIn("HTTP/1.0 200 OK", get_response)
         self.assertIn('"decision": "APPROVED & EXECUTED"', get_response)
-        DummyServer.event_store.write.assert_called_once_with(event)
+        DummyServer.event_store.write.assert_not_called()
         DummyServer.event_store.read.assert_called_once()
+
+    def test_events_latest_rejects_external_writes(self):
+        DummyServer.event_store.reset_mock()
+
+        with patch("sys.stderr", io.StringIO()):
+            handler = self.make_handler(
+                "/events/latest",
+                {"event": {"decision": "FAKE_SUCCESS", "txId": "FAKE"}},
+            )
+
+        response = self.response_text(handler)
+
+        self.assertIn("HTTP/1.0 404 Not Found", response)
+        DummyServer.event_store.write.assert_not_called()
 
     def test_agent_buy_probe_runs_single_orchestrated_flow(self):
         DummyServer.agent_buy_probe.reset_mock()
@@ -373,6 +492,29 @@ class GatewayServerTests(unittest.TestCase):
             "https://x402.goplausible.xyz/examples/weather",
             policy_hash,
         )
+
+    def test_agent_inspect_x402_rejects_local_or_non_https_urls(self):
+        DummyServer.x402_inspector.reset_mock()
+
+        for resource_url in (
+            "file:///etc/passwd",
+            "http://127.0.0.1:8090/probe",
+            "https://localhost/internal",
+            "https://192.168.1.10/protected",
+        ):
+            with self.subTest(resource_url=resource_url), patch(
+                "sys.stderr",
+                io.StringIO(),
+            ):
+                handler = self.make_handler(
+                    "/agent/inspect-x402",
+                    {"url": resource_url, "policyHash": "a" * 64},
+                )
+
+            response = self.response_text(handler)
+            self.assertIn("HTTP/1.0 400 Bad Request", response)
+
+        DummyServer.x402_inspector.assert_not_called()
 
     def test_agent_buy_tool_uses_x402_buyer_and_writes_tool_event(self):
         DummyServer.x402_buyer.reset_mock()
@@ -494,6 +636,36 @@ class GatewayServerTests(unittest.TestCase):
 
         self.assertIn("HTTP/1.0 400 Bad Request", response)
         self.assertIn("qr tool requires url, text, data, or target", response)
+        DummyServer.x402_buyer.assert_not_called()
+
+    def test_agent_buy_qr_tool_rejects_oversized_payload_before_payment(self):
+        DummyServer.x402_buyer.reset_mock()
+
+        with patch("sys.stderr", io.StringIO()):
+            handler = self.make_handler(
+                "/agent/buy-tool",
+                {"tool": "qr", "text": "x" * 2049},
+            )
+
+        response = self.response_text(handler)
+
+        self.assertIn("HTTP/1.0 400 Bad Request", response)
+        self.assertIn("qr payload must be at most 2048 characters", response)
+        DummyServer.x402_buyer.assert_not_called()
+
+    def test_gateway_rejects_oversized_json_body(self):
+        DummyServer.x402_buyer.reset_mock()
+
+        with patch("sys.stderr", io.StringIO()):
+            handler = self.make_handler(
+                "/agent/buy-tool",
+                {"tool": "qr", "text": "x" * 70000},
+            )
+
+        response = self.response_text(handler)
+
+        self.assertIn("HTTP/1.0 400 Bad Request", response)
+        self.assertIn("request body is too large", response)
         DummyServer.x402_buyer.assert_not_called()
 
     def test_external_x402_buyer_sends_human_payment_context_to_firefly(self):
@@ -656,6 +828,7 @@ class AgentStateStoreTests(unittest.TestCase):
         }
         policy_hash = "a" * 64
         requirement = {
+            "network": "algorand-testnet",
             "asset": "ALGO_TEST",
             "purpose": "x402_api_access",
             "amountAtomic": "50000",
@@ -684,6 +857,7 @@ class AgentStateStoreTests(unittest.TestCase):
         }
         policy_hash = "a" * 64
         requirement = {
+            "network": "algorand-testnet",
             "asset": "ALGO_TEST",
             "purpose": "x402_api_access",
             "amountAtomic": "50000",
@@ -700,6 +874,62 @@ class AgentStateStoreTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "paymentIntent already used"):
             store.validate_policy_allows(policy, policy_hash, requirement)
+
+    def test_validate_policy_rejects_non_testnet_payment(self):
+        store = self.make_store()
+        policy = {
+            "asset": "10458941",
+            "allowedPurpose": "x402_api_access",
+            "maxBudgetAtomic": "100000",
+            "maxPerPaymentAtomic": "50000",
+        }
+        policy_hash = "a" * 64
+        requirement = {
+            "network": "algorand-mainnet",
+            "asset": "10458941",
+            "purpose": "x402_api_access",
+            "amountAtomic": "10000",
+            "paymentIntent": "intent-mainnet",
+        }
+        store.write_policy(
+            {
+                "policy": policy,
+                "policyHash": policy_hash,
+                "firefly": {"approvedHash": policy_hash},
+            }
+        )
+
+        with self.assertRaisesRegex(ValueError, "Only algorand-testnet"):
+            store.validate_policy_allows(policy, policy_hash, requirement)
+
+    def test_payment_approval_can_only_be_consumed_once(self):
+        store = self.make_store()
+        policy_hash = "a" * 64
+        payment_hash = "b" * 64
+        store.write_policy(
+            {
+                "policy": {
+                    "asset": "ALGO_TEST",
+                    "allowedPurpose": "x402_api_access",
+                    "maxBudgetAtomic": "100000",
+                    "maxPerPaymentAtomic": "50000",
+                },
+                "policyHash": policy_hash,
+                "firefly": {"approvedHash": policy_hash},
+            }
+        )
+        store.record_payment_approval(
+            payment_hash,
+            {
+                "approved": True,
+                "approvedHash": payment_hash,
+                "deviceModel": 262,
+                "deviceSerial": 1056,
+            },
+        )
+
+        self.assertTrue(store.consume_payment_approval(payment_hash))
+        self.assertFalse(store.consume_payment_approval(payment_hash))
 
 
 if __name__ == "__main__":

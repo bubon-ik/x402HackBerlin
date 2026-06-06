@@ -75,6 +75,39 @@ class GoPlausibleAdapterTests(unittest.TestCase):
 
         self.assertEqual(normalized["paymentIntent"], "intent-from-resource")
 
+    def test_selects_algorand_option_when_accepts_contains_multiple_networks(self):
+        payload = {
+            "x402Version": 2,
+            "accepts": [
+                {
+                    "scheme": "exact",
+                    "network": "base-sepolia",
+                    "amount": "100",
+                    "asset": "0xTOKEN",
+                    "payTo": "0xPAYEE",
+                },
+                {
+                    "scheme": "exact",
+                    "network": ALGORAND_TESTNET_CAIP2,
+                    "amount": "10000",
+                    "asset": "10458941",
+                    "payTo": "ALGORAND_PAYEE",
+                },
+            ],
+        }
+
+        normalized = normalize_x402_payment_required(
+            payload,
+            resource_url="https://example.test/multi-network",
+        )
+
+        self.assertEqual(normalized["network"], "algorand-testnet")
+        self.assertEqual(normalized["receiver"], "ALGORAND_PAYEE")
+        self.assertEqual(
+            normalized["originalPaymentRequirements"],
+            payload["accepts"][1],
+        )
+
     def test_generates_fresh_local_intent_when_external_resource_has_no_nonce(self):
         payload = {
             "paymentRequirements": {
@@ -159,6 +192,7 @@ class GoPlausibleAdapterTests(unittest.TestCase):
 
         self.assertEqual(payload["x402Version"], 2)
         self.assertEqual(payload["accepts"][0]["payTo"], "PAYEE")
+        self.assertTrue(error.closed)
 
 
 if __name__ == "__main__":
