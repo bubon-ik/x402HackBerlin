@@ -6,6 +6,37 @@ The project goal is to let an AI agent access paid x402-protected resources whil
 
 > x402 explains how agents pay. Hermes Sign402 explains how humans safely authorize agents to pay.
 
+## What Judges Should Try
+
+Start the local demo stack:
+
+```bash
+cd "/Users/mp/Documents/Berlin Hack/x402HackBerlin"
+
+FIREFLY_PORT=/dev/cu.usbmodem11301 \
+SIGN402_PAYMENT_PYTHON="/Users/mp/Documents/Berlin Hack/payment-executor/.venv/bin/python" \
+bash scripts/start-local-demo.sh
+```
+
+Expose the gateway:
+
+```bash
+cloudflared tunnel --url http://127.0.0.1:8099
+```
+
+Give Hermes the tunnel URL, approve the policy on Firefly, then try:
+
+```text
+buy weather for Dubai
+buy qr for https://github.com/bubon-ik/x402HackBerlin
+```
+
+Expected proof:
+
+- Firefly shows `x402 WEATHER` for weather and `x402 QR CODE` for QR.
+- Hermes returns compact receipts with paid amount, remaining budget, and clickable Lora transaction links.
+- The agent never receives the Algorand private key.
+
 ## Why This Matters
 
 x402 makes HTTP `402 Payment Required` usable for AI agents, paid APIs, premium data, on-demand compute, and machine-to-machine commerce. That unlocks agentic commerce, but it also creates a trust problem: an autonomous agent should not receive unlimited wallet access just because it can discover paid resources.
