@@ -37,6 +37,7 @@ from .goplausible import fetch_x402_paid_resource, fetch_x402_payment_required, 
 HEX_32_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 MAX_REQUEST_BODY_BYTES = 64 * 1024
 MAX_QR_DATA_CHARS = 2048
+REJECTED_TOOL_RETRY_SUPPRESSION_SECONDS = 120.0
 
 
 PAID_TOOLS: dict[str, dict[str, Any]] = {
@@ -360,15 +361,24 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
             self._send_json({"ok": False, "error": str(exc)}, status=400)
 
     def _handle_agent_buy_tool(self) -> None:
-        if not self._acquire_firefly():
-            self._send_json(_busy_payload(), status=409)
-            return
-
         try:
             payload = self._read_json()
             tool = _resolve_paid_tool(payload)
             request_context = _tool_request_context(payload)
             _validate_tool_request(tool, request_context)
+            rejected_retry = self._read_rejected_tool_retry(tool, request_context)
+            if rejected_retry is not None:
+                self._send_json(rejected_retry)
+                return
+        except Exception as exc:
+            self._send_json({"decision": "rejected", "ok": False, "error": str(exc)}, status=400)
+            return
+
+        if not self._acquire_firefly():
+            self._send_json(_busy_payload(), status=409)
+            return
+
+        try:
             firefly_context = tool.get("fireflyContext")
             if isinstance(firefly_context, dict):
                 result = self.server.x402_buyer(
@@ -382,6 +392,8 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
             enriched["ok"] = bool(result.get("ok", False))
             if enriched.get("ok"):
                 self.server.event_store.write(enriched)
+            elif enriched.get("decision") == "rejected_by_firefly":
+                self._store_rejected_tool_retry(tool, request_context, enriched)
             self._send_json(enriched)
         except TimeoutError:
             self._send_json(_firefly_timeout_payload(decision=True), status=504)
@@ -487,6 +499,48 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
 
         self.server.firefly_busy = False
 
+    def _read_rejected_tool_retry(
+        self,
+        tool: dict[str, Any],
+        request_context: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        cache = getattr(self.server, "rejected_tool_retry_cache", None)
+        if not isinstance(cache, dict):
+            return None
+
+        cache_key = _tool_retry_cache_key(tool, request_context)
+        cached = cache.get(cache_key)
+        if not isinstance(cached, dict):
+            return None
+
+        if time.time() - float(cached.get("storedAt", 0)) > REJECTED_TOOL_RETRY_SUPPRESSION_SECONDS:
+            cache.pop(cache_key, None)
+            return None
+
+        response = dict(cached.get("response") or {})
+        response["duplicateSuppressed"] = True
+        response["message"] = (
+            "Previous Firefly cancel for this same request was not retried. "
+            "Ask again with a new request if you want to purchase."
+        )
+        return response
+
+    def _store_rejected_tool_retry(
+        self,
+        tool: dict[str, Any],
+        request_context: dict[str, Any],
+        response: dict[str, Any],
+    ) -> None:
+        cache = getattr(self.server, "rejected_tool_retry_cache", None)
+        if not isinstance(cache, dict):
+            cache = {}
+            self.server.rejected_tool_retry_cache = cache
+
+        cache[_tool_retry_cache_key(tool, request_context)] = {
+            "storedAt": time.time(),
+            "response": dict(response),
+        }
+
 
 class Sign402GatewayServer(ThreadingHTTPServer):
     def __init__(
@@ -511,6 +565,7 @@ class Sign402GatewayServer(ThreadingHTTPServer):
         self.x402_inspector = x402_inspector
         self.x402_buyer = x402_buyer
         self.firefly_lock = threading.Lock()
+        self.rejected_tool_retry_cache: dict[str, dict[str, Any]] = {}
 
 
 def build_server(
@@ -1154,6 +1209,17 @@ def _tool_request_context(payload: dict[str, Any]) -> dict[str, Any]:
     if qr_data:
         context["qrData"] = qr_data
     return context
+
+
+def _tool_retry_cache_key(tool: dict[str, Any], request_context: dict[str, Any]) -> str:
+    return json.dumps(
+        {
+            "toolId": tool.get("id"),
+            "requestContext": request_context,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
 
 
 def _validate_tool_request(tool: dict[str, Any], request_context: dict[str, Any]) -> None:

@@ -47,7 +47,13 @@ class GatewayServerTests(unittest.TestCase):
         ):
             mock.reset_mock(return_value=True, side_effect=True)
 
-    def make_handler(self, path: str, body: dict | None = None, method: str = "POST"):
+    def make_handler(
+        self,
+        path: str,
+        body: dict | None = None,
+        method: str = "POST",
+        server=None,
+    ):
         encoded = b""
         if body is not None:
             encoded = json.dumps(body).encode("utf-8")
@@ -60,7 +66,7 @@ class GatewayServerTests(unittest.TestCase):
             + encoded
         )
         socket = FakeSocket(request)
-        handler = Sign402GatewayHandler(socket, ("127.0.0.1", 12345), DummyServer())
+        handler = Sign402GatewayHandler(socket, ("127.0.0.1", 12345), server or DummyServer())
         handler.response = socket.wfile
         return handler
 
@@ -683,6 +689,41 @@ class GatewayServerTests(unittest.TestCase):
         self.assertEqual(body["error"], "firefly_timeout")
         self.assertIn("Please retry", body["message"])
         DummyServer.event_store.write.assert_not_called()
+
+    def test_agent_buy_tool_does_not_reprompt_firefly_after_cancel_retry(self):
+        DummyServer.x402_buyer.reset_mock()
+        DummyServer.event_store.reset_mock()
+        DummyServer.firefly_busy = False
+        DummyServer.x402_buyer.return_value = {
+            "decision": "rejected_by_firefly",
+            "ok": False,
+            "resourceUrl": "https://x402.goplausible.xyz/examples/weather",
+            "paymentApprovalHash": "a" * 64,
+            "firefly": {
+                "approved": False,
+                "approvedHash": "a" * 64,
+                "error": "PAYMENT rejected by user",
+            },
+        }
+
+        payload = {"tool": "goplausible.weather", "city": "Berlin"}
+        server = DummyServer()
+        with patch("sys.stderr", io.StringIO()):
+            first = self.make_handler("/agent/buy-tool", payload, server=server)
+            second = self.make_handler("/agent/buy-tool", payload, server=server)
+
+        first_body = self.response_json(first)
+        second_body = self.response_json(second)
+
+        self.assertFalse(first_body["ok"])
+        self.assertEqual(first_body["decision"], "rejected_by_firefly")
+        self.assertFalse(second_body["ok"])
+        self.assertEqual(second_body["decision"], "rejected_by_firefly")
+        self.assertTrue(second_body["duplicateSuppressed"])
+        self.assertIn("not retried", second_body["message"])
+        DummyServer.x402_buyer.assert_called_once_with(
+            "https://x402.goplausible.xyz/examples/weather"
+        )
 
     def test_agent_buy_qr_tool_requires_data_before_payment(self):
         DummyServer.x402_buyer.reset_mock()
