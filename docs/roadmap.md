@@ -27,7 +27,9 @@
 - [x] Prove official GoPlausible weather x402 payment with `x402-avm`.
 - [x] Add gateway endpoint `POST /agent/buy-x402`.
 - [x] Prove official GoPlausible weather purchase through Hermes Telegram.
-- [ ] Rehearse the short-mode demo end to end.
+- [x] Rehearse the official GoPlausible paid-tool demo end to end.
+- [x] Add city-aware compact Telegram receipts for weather purchases.
+- [ ] Polish dashboard for the official paid-tool flow.
 
 ### Done
 
@@ -87,10 +89,12 @@
 - [x] Update Hermes prompt to use only `/agent/buy-probe`.
 - [x] Create hackathon demo script.
 - [ ] Create pitch deck.
-- [ ] Prepare clean hackathon repo plan.
+- [x] Prepare clean hackathon repo plan.
+- [x] Publish clean hackathon repo with runnable modules and tests.
 - [x] Wire `x402-avm` SDK to create official `PAYMENT-SIGNATURE` payment groups.
 - [x] Test against a live GoPlausible protected API/resource.
 - [x] Rehearse `/agent/buy-x402` through Hermes Telegram with Firefly approval.
+- [x] Rehearse `/agent/buy-tool` through Hermes Telegram with compact city receipt.
 
 ### Later / Milestone
 
@@ -103,7 +107,9 @@
 
 ## Current Stage
 
-We have a working short-mode demo:
+The project is in **demo-ready MVP / polish phase**.
+
+We have a working official x402 paid-tool demo:
 
 - Firefly is flashed with custom firmware.
 - Firefly can approve policy and payment hashes with `PAYMENT=<hash>`.
@@ -114,16 +120,20 @@ We have a working short-mode demo:
   - `POST /agent/buy-probe`
   - `POST /agent/inspect-x402`
   - `POST /agent/buy-x402`
+  - `GET /agent/tools`
+  - `POST /agent/inspect-tool`
+  - `POST /agent/buy-tool`
   - `GET/POST /events/latest`
 - The x402 demo resource server returns `402 Payment Required` with a fresh `paymentIntent` for each unpaid request.
 - The payment executor sends real Algorand TestNet payments.
-- Hermes Telegram has completed the short-mode flow through `/agent/buy-probe`:
-  - `decision`: `approved_and_executed`
-  - latest tested `policyHash`: `c48a9b0b21479ed2ca08dff60c265274f7c5950e7ab4728048f76a5265338490`
-  - latest tested `paymentApprovalHash`: `9176849009f5ab571de7eb647f3b718e7ed8c021a991afd9f3ee2c6a3bacea61`
-  - latest tested `txId`: `HGZ2C5BLWRO6GVQPY3ORYHPAN463FFZWMJMJ5XOI52WQQFHWQR7A`
+- Hermes Telegram has completed live official GoPlausible weather purchases through `/agent/buy-tool`.
+- Gateway responses now include compact `telegramText` receipts, e.g.:
 
-The project is now in the **demo packaging plus official x402 compatibility phase**.
+```text
+✅ Dubai Weather: 86°F, Sunny. Paid 0.01 USDC. Tx WCEOLASN65WVXWVOBAUVAPJHMHRNMLRPN6JIIHCMBPIFE7NDR4UA. Budget left 0.97 USDC.
+```
+
+The local `/agent/buy-probe` demo resource remains available as a regression and backup path.
 
 ## GoPlausible / Official x402 Status
 
@@ -164,19 +174,23 @@ This makes the main agent experience tool-oriented:
 agent lists/inspects paid tool -> sees price/asset/receiver -> Firefly approval -> x402 payment -> tool result
 ```
 
-Hermes Telegram proof returned weather JSON from GoPlausible with transaction:
+Hermes Telegram proof returned weather JSON from GoPlausible with transactions:
 
 ```text
 BTVGJ3MN42KKFBUN6BV3QRDZZDO54H2OCDX5LKHRU3PFASFYW72A
+WB44C5U2Q73AP5XPD55GMTUVBKDUJZTI6LGT4ZOMZQ2VJKFDHDSQ
+WCEOLASN65WVXWVOBAUVAPJHMHRNMLRPN6JIIHCMBPIFE7NDR4UA
 ```
 
 Latest official x402 run:
 
 ```text
-command: buy goplausible weather
+command: buy weather for Dubai
 asset: USDC TestNet ASA 10458941
 amount: 10000 atomic / 0.01 USDC
-remaining budget: 80000 atomic / 0.08 USDC
+remaining budget: 970000 atomic / 0.97 USDC
+city: Dubai
+weather: 86°F, Sunny
 result: official_x402_resource_access_granted
 ```
 
@@ -221,19 +235,20 @@ The current pitch demo uses the official GoPlausible weather x402 path. Server-s
 1. Local demo launcher for resource server, Sign402 Gateway, and dashboard.
 2. Tunnel to Sign402 Gateway.
 3. Policy approval for USDC TestNet ASA `10458941`.
-4. Telegram command `buy goplausible weather`.
-5. Gateway endpoint `POST /agent/buy-x402`.
+4. Telegram command `buy weather for <city>`.
+5. Gateway endpoint `POST /agent/buy-tool` with `{"tool":"goplausible.weather","city":"<city>"}`.
+6. Hermes replies with the gateway `telegramText` field only.
 
 The local demo resource server remains available for regression and backup demos, but it is no longer the main pitch path.
 
 ## Next Step
 
-Rehearse the **official GoPlausible hackathon demo script**.
+Polish the **official GoPlausible paid-tool dashboard** after the core pitch flow is stable.
 
 The gateway now writes `GET/POST /events/latest`, and the dashboard polls it. The main demo path is:
 
 ```text
-Telegram command -> gateway /agent/buy-x402 -> GoPlausible 402 -> USDC policy check -> Firefly payment approval -> x402-avm PAYMENT-SIGNATURE -> GoPlausible facilitator settlement -> protected weather JSON -> gateway event -> dashboard updates
+Telegram command -> gateway /agent/buy-tool -> GoPlausible 402 -> USDC policy check -> Firefly payment approval -> x402-avm PAYMENT-SIGNATURE -> GoPlausible facilitator settlement -> protected weather JSON -> compact Telegram receipt -> gateway event -> dashboard updates
 ```
 
 ## Sign402 Gateway
