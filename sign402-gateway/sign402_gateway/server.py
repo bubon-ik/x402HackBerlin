@@ -141,6 +141,47 @@ PAID_TOOLS: dict[str, dict[str, Any]] = {
             "required": [],
         },
     },
+    "quantoz.eurd.transfer": {
+        "id": "quantoz.eurd.transfer",
+        "name": "Quantoz EURD Transfer",
+        "kind": "local_mainnet_eurd_transfer",
+        "source": "sign402-gateway",
+        "description": "Firefly-approved EURD ASA transfer on Algorand MainNet.",
+        "resourceUrl": "sign402://payments/eurd-transfer",
+        "paymentResourceUrl": "sign402://payments/eurd-transfer",
+        "paymentStandard": "sign402-direct-transfer",
+        "network": EURD_NETWORK,
+        "asset": str(EURD_ASA_ID),
+        "assetName": "EURD",
+        "price": "variable EURD",
+        "priceAtomic": "variable",
+        "inspectEndpoint": "/agent/tools",
+        "buyEndpoint": "/agent/pay-eurd",
+        "command": "pay eurd",
+        "mcpStyleName": "pay_eurd",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "receiver": {
+                    "type": "string",
+                    "description": "Whitelisted Algorand MainNet receiver address.",
+                },
+                "amount": {
+                    "type": "string",
+                    "description": "EURD amount with up to 2 decimals, e.g. 0.01.",
+                },
+                "amountAtomic": {
+                    "type": "string",
+                    "description": "Atomic EURD amount; 1 equals 0.01 EURD.",
+                },
+                "memo": {
+                    "type": "string",
+                    "description": "Optional note for the payment approval commitment.",
+                },
+            },
+            "required": ["receiver"],
+        },
+    },
 }
 
 PAID_TOOL_ALIASES = {
@@ -153,6 +194,10 @@ PAID_TOOL_ALIASES = {
     "qr-code": "sign402.qr",
     "qr_code": "sign402.qr",
     "create_qr_code": "sign402.qr",
+    "eurd": "quantoz.eurd.transfer",
+    "pay_eurd": "quantoz.eurd.transfer",
+    "quantoz-eurd": "quantoz.eurd.transfer",
+    "quantoz_eurd": "quantoz.eurd.transfer",
 }
 
 
@@ -424,6 +469,14 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
             tool = _resolve_paid_tool(payload)
             request_context = _tool_request_context(payload)
             _validate_tool_request(tool, request_context)
+            if tool.get("id") == "quantoz.eurd.transfer":
+                event, status = self._execute_agent_pay_eurd(payload)
+                event = _tool_result(tool, event, request_context)
+                if event.get("ok"):
+                    self.server.event_store.write(event)
+                self._send_json(event, status=status)
+                return
+
             firefly_context = tool.get("fireflyContext")
             if isinstance(firefly_context, dict):
                 result = self.server.x402_buyer(
@@ -452,18 +505,30 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
 
         try:
             payload = self._read_json()
-            request = _eurd_payment_request(payload)
-            payment_hash = _hash_json(request["paymentCommitment"])
-            approval = self.server.firefly.approve_payment_hash(
-                payment_hash,
-                context_lines=[
-                    "EURD PAYMENT",
-                    _format_eurd_amount(request["amountAtomic"]),
-                    _short_address(request["receiver"]),
-                ],
-            )
-            if not approval.get("approved"):
-                event = {
+            event, status = self._execute_agent_pay_eurd(payload)
+            self.server.event_store.write(event)
+            self._send_json(event, status=status)
+        except TimeoutError:
+            self._send_json(_firefly_timeout_payload(decision=True), status=504)
+        except Exception as exc:
+            self._send_json({"decision": "rejected", "ok": False, "error": str(exc)}, status=400)
+        finally:
+            self._release_firefly()
+
+    def _execute_agent_pay_eurd(self, payload: dict[str, Any]) -> tuple[dict[str, Any], int]:
+        request = _eurd_payment_request(payload)
+        payment_hash = _hash_json(request["paymentCommitment"])
+        approval = self.server.firefly.approve_payment_hash(
+            payment_hash,
+            context_lines=[
+                "EURD PAYMENT",
+                _format_eurd_amount(request["amountAtomic"]),
+                _short_address(request["receiver"]),
+            ],
+        )
+        if not approval.get("approved"):
+            return (
+                {
                     "decision": "rejected_by_firefly",
                     "ok": False,
                     "mode": "quantoz_eurd_mainnet_transfer",
@@ -476,23 +541,23 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
                     "network": EURD_NETWORK,
                     "firefly": approval,
                     "telegramText": "❌ EURD payment canceled on Firefly. No payment was made.",
-                }
-                self.server.event_store.write(event)
-                self._send_json(event, status=400)
-                return
-
-            if str(approval.get("approvedHash", "")).lower() != payment_hash:
-                raise ValueError("Firefly approved hash does not match EURD payment hash.")
-
-            note = f"sign402-eurd:{payment_hash[:16]}".encode("utf-8")
-            payment = self.server.eurd_payment_executor(
-                receiver=request["receiver"],
-                amount_atomic=request["amountAtomic"],
-                note=note,
+                },
+                400,
             )
-            tx_id = str(payment["txId"])
-            tx_url = _transaction_display_url(tx_id, network="mainnet")
-            event = {
+
+        if str(approval.get("approvedHash", "")).lower() != payment_hash:
+            raise ValueError("Firefly approved hash does not match EURD payment hash.")
+
+        note = f"sign402-eurd:{payment_hash[:16]}".encode("utf-8")
+        payment = self.server.eurd_payment_executor(
+            receiver=request["receiver"],
+            amount_atomic=request["amountAtomic"],
+            note=note,
+        )
+        tx_id = str(payment["txId"])
+        tx_url = _transaction_display_url(tx_id, network="mainnet")
+        return (
+            {
                 "decision": "approved_and_executed",
                 "ok": True,
                 "mode": "quantoz_eurd_mainnet_transfer",
@@ -512,15 +577,9 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
                     f"✅ EURD paid: {_format_eurd_amount(request['amountAtomic'])}. "
                     f"Tx {tx_url}."
                 ),
-            }
-            self.server.event_store.write(event)
-            self._send_json(event)
-        except TimeoutError:
-            self._send_json(_firefly_timeout_payload(decision=True), status=504)
-        except Exception as exc:
-            self._send_json({"decision": "rejected", "ok": False, "error": str(exc)}, status=400)
-        finally:
-            self._release_firefly()
+            },
+            200,
+        )
 
     def _handle_agent_inspect_x402(self) -> None:
         try:
@@ -1395,10 +1454,16 @@ def _tool_request_context(payload: dict[str, Any]) -> dict[str, Any]:
         context["city"] = city
     if qr_data:
         context["qrData"] = qr_data
+    for key in ("receiver", "to", "payTo", "amount", "amountAtomic", "memo", "message"):
+        if payload.get(key) is not None:
+            context[key] = payload[key]
     return context
 
 
 def _validate_tool_request(tool: dict[str, Any], request_context: dict[str, Any]) -> None:
+    if tool.get("id") == "quantoz.eurd.transfer":
+        _eurd_payment_request(request_context)
+        return
     if tool.get("id") != "sign402.qr":
         return
     qr_data = str(request_context.get("qrData") or "")
@@ -1504,15 +1569,15 @@ def _manifest_tool(tool: dict[str, Any]) -> dict[str, Any]:
         "paymentResourceUrl": _tool_payment_resource_url(tool),
         "mcpStyleName": tool["mcpStyleName"],
         "inputSchema": tool["inputSchema"],
-        "paymentStandard": "x402",
-        "network": "algorand-testnet",
-        "asset": "10458941",
-        "assetName": "USDC",
-        "price": "0.01 USDC",
-        "priceAtomic": "10000",
+        "paymentStandard": tool.get("paymentStandard", "x402"),
+        "network": tool.get("network", "algorand-testnet"),
+        "asset": tool.get("asset", "10458941"),
+        "assetName": tool.get("assetName", "USDC"),
+        "price": tool.get("price", "0.01 USDC"),
+        "priceAtomic": tool.get("priceAtomic", "10000"),
         "requiresFireflyApproval": True,
-        "inspectEndpoint": "/agent/inspect-tool",
-        "buyEndpoint": "/agent/buy-tool",
+        "inspectEndpoint": tool.get("inspectEndpoint", "/agent/inspect-tool"),
+        "buyEndpoint": tool.get("buyEndpoint", "/agent/buy-tool"),
         "receiptField": "telegramText",
     }
     return manifest
