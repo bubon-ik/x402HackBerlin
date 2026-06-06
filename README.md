@@ -30,17 +30,27 @@ docs/                  Notes, protocol sketches, and demo docs
 
 ## Development Status
 
-This repository starts with the project skeleton. Implementation will be added in small, reviewable steps during the hackathon.
+Current repo state:
+
+- project skeleton is in place;
+- `sign402-gateway` has landed as the first core service;
+- the gateway expects the bridge, executor, demo resource, and live demo modules to land in follow-up commits.
 
 ## Local Setup
 
-Setup commands will be added as the modules land.
+Install and test individual modules from their package directories as they land.
 
 Expected baseline:
 
 ```bash
 python3 --version
 git status
+```
+
+Gateway adapter tests:
+
+```bash
+PYTHONPATH=sign402-gateway python3 -m unittest sign402-gateway/tests/test_goplausible_adapter.py
 ```
 
 ## Demo Flow
