@@ -34,6 +34,19 @@ class FakeSocket:
 
 
 class GatewayServerTests(unittest.TestCase):
+    def setUp(self):
+        DummyServer.firefly_busy = False
+        for mock in (
+            DummyServer.firefly,
+            DummyServer.payment_executor,
+            DummyServer.event_store,
+            DummyServer.agent_state_store,
+            DummyServer.agent_buy_probe,
+            DummyServer.x402_inspector,
+            DummyServer.x402_buyer,
+        ):
+            mock.reset_mock(return_value=True, side_effect=True)
+
     def make_handler(self, path: str, body: dict | None = None, method: str = "POST"):
         encoded = b""
         if body is not None:
@@ -123,6 +136,27 @@ class GatewayServerTests(unittest.TestCase):
             DummyServer.firefly.approve_payment_hash.return_value,
         )
         DummyServer.payment_executor.assert_not_called()
+
+    def test_approve_payment_firefly_timeout_returns_gateway_timeout(self):
+        payment_hash = "b" * 64
+        DummyServer.firefly.reset_mock()
+        DummyServer.agent_state_store.reset_mock()
+        DummyServer.firefly_busy = False
+        DummyServer.firefly.approve_payment_hash.side_effect = TimeoutError(
+            "Firefly payment approval timed out after 90 seconds."
+        )
+
+        with patch("sys.stderr", io.StringIO()):
+            handler = self.make_handler("/approve-payment", {"paymentHash": payment_hash})
+
+        response = self.response_text(handler)
+        body = self.response_json(handler)
+
+        self.assertIn("HTTP/1.0 504 Gateway Timeout", response)
+        self.assertFalse(body["approved"])
+        self.assertEqual(body["error"], "firefly_timeout")
+        self.assertIn("Please retry", body["message"])
+        DummyServer.agent_state_store.record_payment_approval.assert_not_called()
 
     def test_approve_policy_stores_policy_for_agent_endpoint(self):
         policy = {
@@ -625,6 +659,30 @@ class GatewayServerTests(unittest.TestCase):
         self.assertEqual(saved_event["toolId"], "sign402.qr")
         self.assertEqual(saved_event["qrData"], "https://github.com/bubon-ik/x402HackBerlin")
         self.assertIn("qrImageUrl", saved_event)
+
+    def test_agent_buy_tool_firefly_timeout_returns_gateway_timeout(self):
+        DummyServer.x402_buyer.reset_mock()
+        DummyServer.event_store.reset_mock()
+        DummyServer.firefly_busy = False
+        DummyServer.x402_buyer.side_effect = TimeoutError(
+            "Firefly payment approval timed out after 90 seconds."
+        )
+
+        with patch("sys.stderr", io.StringIO()):
+            handler = self.make_handler(
+                "/agent/buy-tool",
+                {"tool": "goplausible.weather", "city": "Berlin"},
+            )
+
+        response = self.response_text(handler)
+        body = self.response_json(handler)
+
+        self.assertIn("HTTP/1.0 504 Gateway Timeout", response)
+        self.assertFalse(body["ok"])
+        self.assertEqual(body["decision"], "firefly_timeout")
+        self.assertEqual(body["error"], "firefly_timeout")
+        self.assertIn("Please retry", body["message"])
+        DummyServer.event_store.write.assert_not_called()
 
     def test_agent_buy_qr_tool_requires_data_before_payment(self):
         DummyServer.x402_buyer.reset_mock()

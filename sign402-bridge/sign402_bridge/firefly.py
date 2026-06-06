@@ -111,7 +111,7 @@ class FireflyClient:
     timeout: float = 0.2
     settle_seconds: float = 2.0
     read_seconds: float = 5.0
-    payment_read_seconds: float = 35.0
+    payment_read_seconds: float = 90.0
 
     def approve_policy_hash(self, policy_hash: str) -> dict[str, object]:
         if not re.fullmatch(r"[0-9a-fA-F]{64}", policy_hash):
@@ -190,7 +190,11 @@ class FireflyClient:
                 raw = b"".join(chunks).decode("latin1", "replace")
                 if "<OK" in raw or "<ERROR" in raw:
                     return raw
-        return b"".join(chunks).decode("latin1", "replace")
+        raw = b"".join(chunks).decode("latin1", "replace")
+        message = f"Firefly approval timed out after {seconds:.0f} seconds."
+        if raw:
+            message += f" Raw response: {raw!r}"
+        raise TimeoutError(message)
 
     def _read_until_ready(self, serial_port, seconds: float) -> str:
         end = time.time() + seconds

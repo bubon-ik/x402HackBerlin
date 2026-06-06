@@ -1,6 +1,7 @@
 import unittest
 
 from sign402_bridge.firefly import (
+    FireflyClient,
     format_payment_context_command,
     parse_payment_approval,
     parse_policy_approval,
@@ -8,6 +9,11 @@ from sign402_bridge.firefly import (
 
 
 class FireflyTests(unittest.TestCase):
+    def test_payment_approval_waits_long_enough_for_stage_demo(self):
+        client = FireflyClient(port="/dev/cu.usbmodem-test")
+
+        self.assertEqual(client.payment_read_seconds, 90.0)
+
     def test_parse_policy_approval_response(self):
         policy_hash = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
         raw = "\n".join(

@@ -211,6 +211,8 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
             }
             self.server.agent_state_store.write_policy(response)
             self._send_json(response)
+        except TimeoutError:
+            self._send_json(_firefly_timeout_payload(approved=False), status=504)
         except Exception as exc:
             self._send_json({"approved": False, "error": str(exc)}, status=400)
         finally:
@@ -247,6 +249,8 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
                 },
                 status=200 if approval.get("approved") else 400,
             )
+        except TimeoutError:
+            self._send_json(_firefly_timeout_payload(approved=False), status=504)
         except Exception as exc:
             self._send_json({"approved": False, "error": str(exc)}, status=400)
         finally:
@@ -323,6 +327,8 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
 
             result = self.server.agent_buy_probe(target)
             self._send_json(result)
+        except TimeoutError:
+            self._send_json(_firefly_timeout_payload(decision=True), status=504)
         except Exception as exc:
             self._send_json({"decision": "rejected", "ok": False, "error": str(exc)}, status=400)
         finally:
@@ -377,6 +383,8 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
             if enriched.get("ok"):
                 self.server.event_store.write(enriched)
             self._send_json(enriched)
+        except TimeoutError:
+            self._send_json(_firefly_timeout_payload(decision=True), status=504)
         except Exception as exc:
             self._send_json({"decision": "rejected", "ok": False, "error": str(exc)}, status=400)
         finally:
@@ -410,6 +418,8 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
 
             result = self.server.x402_buyer(resource_url)
             self._send_json(result)
+        except TimeoutError:
+            self._send_json(_firefly_timeout_payload(decision=True), status=504)
         except Exception as exc:
             self._send_json({"decision": "rejected", "ok": False, "error": str(exc)}, status=400)
         finally:
@@ -1420,6 +1430,23 @@ def _busy_payload() -> dict[str, Any]:
         "error": "firefly_busy",
         "message": "Firefly is already handling another approval request.",
     }
+
+
+def _firefly_timeout_payload(
+    *,
+    approved: bool | None = None,
+    decision: bool = False,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "error": "firefly_timeout",
+        "message": "Firefly approval timed out. Please retry when the device is ready.",
+    }
+    if approved is not None:
+        payload["approved"] = approved
+    if decision:
+        payload["decision"] = "firefly_timeout"
+        payload["ok"] = False
+    return payload
 
 
 if __name__ == "__main__":

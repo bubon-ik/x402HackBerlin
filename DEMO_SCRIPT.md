@@ -20,12 +20,14 @@ ls /dev/cu.usb*
 Start the local stack:
 
 ```bash
-cd "/Users/mp/Documents/Berlin Hack/x402HackBerlin"
+cd x402HackBerlin
 
-FIREFLY_PORT=/dev/cu.usbmodem11301 \
-SIGN402_PAYMENT_PYTHON="/Users/mp/Documents/Berlin Hack/payment-executor/.venv/bin/python" \
+FIREFLY_PORT=/dev/cu.usbmodemXXXX \
+SIGN402_PAYMENT_PYTHON="../payment-executor/.venv/bin/python" \
 bash scripts/start-local-demo.sh
 ```
+
+On the demo Mac, use the exact Firefly port from `ls /dev/cu.usb*`.
 
 Open the dashboard:
 
@@ -51,8 +53,9 @@ Before buying weather, call POST /agent/inspect-tool with {"tool":"goplausible.w
 When I say "buy weather for <city>", call POST /agent/buy-tool with {"tool":"goplausible.weather","city":"<city>"}.
 When I say "buy weather" without a city, call POST /agent/buy-tool with {"tool":"goplausible.weather"}.
 When I say "buy qr for <url or text>", call POST /agent/buy-tool with {"tool":"qr","url":"<url or text>"}.
-After buying, reply using the gateway's telegramText field only.
-For QR purchases, also return qrImageUrl.
+After buying weather, reply using only telegramText.
+After buying QR, send qrImageUrl as a Telegram photo and use telegramText as the caption. If you cannot send a photo, reply with telegramText and then qrImageUrl on the next line.
+If the gateway returns error=firefly_timeout, tell me: "Firefly approval timed out. Please press approve faster and retry the purchase."
 Do not build the x402 payment yourself. Do not ask for private keys. Only call the Sign402 Gateway.
 ```
 
@@ -216,9 +219,9 @@ Stop the old process or restart the terminal session, then run:
 ```bash
 lsof -tiTCP:8090 -tiTCP:8099 -tiTCP:8100 | xargs kill
 
-cd "/Users/mp/Documents/Berlin Hack/x402HackBerlin"
+cd x402HackBerlin
 
-FIREFLY_PORT=/dev/cu.usbmodem11301 \
-SIGN402_PAYMENT_PYTHON="/Users/mp/Documents/Berlin Hack/payment-executor/.venv/bin/python" \
+FIREFLY_PORT=/dev/cu.usbmodemXXXX \
+SIGN402_PAYMENT_PYTHON="../payment-executor/.venv/bin/python" \
 bash scripts/start-local-demo.sh
 ```

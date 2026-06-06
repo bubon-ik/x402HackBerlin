@@ -11,12 +11,14 @@ The project goal is to let an AI agent access paid x402-protected resources whil
 Start the local demo stack:
 
 ```bash
-cd "/Users/mp/Documents/Berlin Hack/x402HackBerlin"
+cd x402HackBerlin
 
-FIREFLY_PORT=/dev/cu.usbmodem11301 \
-SIGN402_PAYMENT_PYTHON="/Users/mp/Documents/Berlin Hack/payment-executor/.venv/bin/python" \
+FIREFLY_PORT=/dev/cu.usbmodemXXXX \
+SIGN402_PAYMENT_PYTHON="../payment-executor/.venv/bin/python" \
 bash scripts/start-local-demo.sh
 ```
+
+If `payment-executor` is importable in your current Python environment, `SIGN402_PAYMENT_PYTHON` can be omitted. On the demo Mac, replace `FIREFLY_PORT` with the USB modem path shown by `ls /dev/cu.usb*`.
 
 Expose the gateway:
 
