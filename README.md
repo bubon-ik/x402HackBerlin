@@ -36,6 +36,11 @@ Current repo state:
 - `sign402-gateway` has landed as the first core service;
 - the gateway expects the bridge, executor, demo resource, and live demo modules to land in follow-up commits.
 
+## Source Of Truth
+
+- [Project spec](docs/project-spec.md)
+- [Roadmap](docs/roadmap.md)
+
 ## Local Setup
 
 Install and test individual modules from their package directories as they land.
