@@ -1,0 +1,12 @@
+[project]
+name = "sign402-bridge"
+version = "0.1.0"
+description = "Local Firefly approval bridge for Hermes Sign402"
+requires-python = ">=3.11"
+dependencies = [
+  "pyserial>=3.5"
+]
+
+[project.scripts]
+sign402-bridge = "sign402_bridge.server:main"
+

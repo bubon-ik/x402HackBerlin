@@ -34,7 +34,8 @@ Current repo state:
 
 - project skeleton is in place;
 - `sign402-gateway` has landed as the first core service;
-- the gateway expects the bridge, executor, demo resource, and live demo modules to land in follow-up commits.
+- `sign402-bridge` has landed as the Firefly approval layer;
+- the gateway expects the executor, demo resource, and live demo modules to land in follow-up commits.
 
 ## Source Of Truth
 
@@ -56,6 +57,12 @@ Gateway adapter tests:
 
 ```bash
 PYTHONPATH=sign402-gateway python3 -m unittest sign402-gateway/tests/test_goplausible_adapter.py
+```
+
+Bridge tests:
+
+```bash
+PYTHONPATH=sign402-bridge python3 -m unittest discover -s sign402-bridge/tests
 ```
 
 ## Demo Flow
