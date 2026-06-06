@@ -36,7 +36,8 @@ Current repo state:
 - `sign402-gateway` has landed as the first core service;
 - `sign402-bridge` has landed as the Firefly approval layer;
 - `payment-executor` has landed as the Algorand/x402 payment execution layer;
-- the gateway expects the demo resource and live demo modules to land in follow-up commits.
+- `live-demo` has landed as the strict demo orchestration layer;
+- the gateway expects the demo resource module to land in a follow-up commit.
 
 ## Source Of Truth
 
@@ -70,6 +71,12 @@ Payment executor tests:
 
 ```bash
 PYTHONPATH=payment-executor python3 -m unittest discover -s payment-executor/tests
+```
+
+Live demo tests:
+
+```bash
+PYTHONPATH=live-demo python3 -m unittest discover -s live-demo/tests
 ```
 
 ## Demo Flow
