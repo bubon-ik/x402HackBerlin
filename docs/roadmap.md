@@ -104,7 +104,8 @@
 - [ ] Add independent x402 merchants for non-weather paid tools.
 - [ ] Add durable replay protection.
 - [ ] Add production-grade gateway auth.
-- [ ] Add mainnet mode.
+- [x] Add Quantoz EURD production rail metadata.
+- [ ] Add live Quantoz EURD mainnet mode after KYC/API credentials are ready.
 
 ## Current Stage
 

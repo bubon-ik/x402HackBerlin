@@ -94,10 +94,32 @@ GET /.well-known/x402.json
 
 The manifest describes available tools, x402 pricing, Algorand asset/network metadata, Firefly approval requirements, and the compact receipt field agents should return to users.
 
+The gateway also exposes payment rail metadata:
+
+```text
+GET /agent/rails
+```
+
+Rails:
+
+- `algorand-testnet-usdc`: live demo rail for safe USDC payments on Algorand TestNet.
+- `quantoz-eurd-mainnet`: optional production rail for MiCA-aligned EURD/EURO agent payments on Algorand MainNet.
+
 Current paid tools:
 
 - `goplausible.weather` / `get_weather`: buy a weather lookup through the official GoPlausible x402 resource.
 - `sign402.qr` / `create_qr_code`: buy QR code generation for a URL or text payload after the same Firefly-approved x402 payment flow.
+
+## Quantoz EURD Production Rail
+
+The live hackathon demo stays on Algorand TestNet USDC so judges can run payments safely without real funds. The same Sign402 approval layer can sit in front of Quantoz's euro-native rail for production EU agent commerce:
+
+- `EURD` on Algorand MainNet, ASA `1221682136`.
+- Quantoz x402 facilitator: `https://x402algo.ai.quantozpay.com`.
+- Agent-side SDK path: `@ever_amsterdam/x402-euro-eurd`.
+- Required production credentials: `QUANTOZ_API_KEY` and `QUANTOZ_ACCOUNT`.
+
+This gives the project a clean migration path from demo USDC settlement to regulated EURD/EURO micropayments, while keeping Firefly as the human consent layer for autonomous agents.
 
 ## Planned Architecture
 

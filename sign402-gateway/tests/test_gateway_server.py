@@ -83,6 +83,12 @@ class GatewayServerTests(unittest.TestCase):
         self.assertEqual(body["name"], "Hermes Sign402 Gateway")
         self.assertEqual(body["x402Version"], 2)
         self.assertEqual(body["network"], "algorand-testnet")
+        quantoz_rail = next(rail for rail in body["paymentRails"] if rail["id"] == "quantoz-eurd-mainnet")
+        self.assertEqual(quantoz_rail["asset"], "EURD")
+        self.assertEqual(quantoz_rail["assetId"], "1221682136")
+        self.assertEqual(quantoz_rail["facilitator"], "https://x402algo.ai.quantozpay.com")
+        self.assertTrue(quantoz_rail["requiresKyc"])
+        self.assertEqual(quantoz_rail["status"], "production_ready_optional")
         self.assertEqual(body["tools"][0]["id"], "goplausible.weather")
         self.assertEqual(body["tools"][0]["price"], "0.01 USDC")
         self.assertEqual(body["tools"][0]["asset"], "10458941")
@@ -102,6 +108,27 @@ class GatewayServerTests(unittest.TestCase):
             manifest = self.make_handler("/agent/manifest", method="GET")
 
         self.assertEqual(self.response_json(well_known), self.response_json(manifest))
+
+    def test_agent_rails_exposes_quantoz_eurd_production_rail(self):
+        with patch("sys.stderr", io.StringIO()):
+            handler = self.make_handler("/agent/rails", method="GET")
+
+        response = self.response_text(handler)
+        body = self.response_json(handler)
+
+        self.assertIn("HTTP/1.0 200 OK", response)
+        self.assertTrue(body["ok"])
+        self.assertEqual(body["defaultRail"], "algorand-testnet-usdc")
+        quantoz_rail = next(rail for rail in body["rails"] if rail["id"] == "quantoz-eurd-mainnet")
+        self.assertEqual(quantoz_rail["network"], "algorand-mainnet")
+        self.assertEqual(quantoz_rail["asset"], "EURD")
+        self.assertEqual(quantoz_rail["assetId"], "1221682136")
+        self.assertEqual(quantoz_rail["scheme"], "euro")
+        self.assertEqual(quantoz_rail["facilitator"], "https://x402algo.ai.quantozpay.com")
+        self.assertEqual(quantoz_rail["sdk"], "@ever_amsterdam/x402-euro-eurd")
+        self.assertIn("QUANTOZ_API_KEY", quantoz_rail["requiredEnv"])
+        self.assertIn("QUANTOZ_ACCOUNT", quantoz_rail["requiredEnv"])
+        self.assertTrue(quantoz_rail["requiresKyc"])
 
     def test_approve_payment_uses_firefly(self):
         payment_hash = "b" * 64

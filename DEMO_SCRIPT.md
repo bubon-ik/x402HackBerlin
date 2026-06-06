@@ -49,6 +49,7 @@ https://<gateway-tunnel>.trycloudflare.com
 
 For policy approval, call POST /approve-policy.
 For listing paid tools, call GET /agent/tools.
+For listing supported payment rails, call GET /agent/rails.
 Before buying weather, call POST /agent/inspect-tool with {"tool":"goplausible.weather"}.
 When I say "buy weather for <city>", call POST /agent/buy-tool with {"tool":"goplausible.weather","city":"<city>"}.
 When I say "buy weather" without a city, call POST /agent/buy-tool with {"tool":"goplausible.weather"}.
@@ -67,6 +68,12 @@ Say:
 
 ```text
 x402 lets agents pay for web resources. Sign402 adds the missing consent layer: the agent can act autonomously, but payments are bounded by a hardware-approved policy and each live payment needs physical Firefly approval.
+```
+
+If a judge asks about real euro payments, say:
+
+```text
+Today the live demo uses TestNet USDC for safe judging. The gateway also exposes a Quantoz EURD production rail: EURD on Algorand MainNet, ASA 1221682136, via the Quantoz x402 facilitator. That lets the same Sign402 consent layer move from demo dollars to regulated euro agent payments.
 ```
 
 ### 2. Approve Policy

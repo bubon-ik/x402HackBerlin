@@ -39,6 +39,40 @@ MAX_REQUEST_BODY_BYTES = 64 * 1024
 MAX_QR_DATA_CHARS = 2048
 
 
+PAYMENT_RAILS: dict[str, dict[str, Any]] = {
+    "algorand-testnet-usdc": {
+        "id": "algorand-testnet-usdc",
+        "name": "Algorand TestNet USDC",
+        "status": "live_demo_default",
+        "network": "algorand-testnet",
+        "scheme": "x402-avm",
+        "asset": "USDC",
+        "assetId": "10458941",
+        "assetDecimals": 6,
+        "facilitator": "https://x402.goplausible.xyz",
+        "requiresKyc": False,
+        "requiresMainnetFunds": False,
+        "description": "Current hackathon demo rail for safe TestNet x402 payments.",
+    },
+    "quantoz-eurd-mainnet": {
+        "id": "quantoz-eurd-mainnet",
+        "name": "Quantoz EURD MainNet",
+        "status": "production_ready_optional",
+        "network": "algorand-mainnet",
+        "scheme": "euro",
+        "asset": "EURD",
+        "assetId": "1221682136",
+        "assetDecimals": 2,
+        "facilitator": "https://x402algo.ai.quantozpay.com",
+        "sdk": "@ever_amsterdam/x402-euro-eurd",
+        "requiredEnv": ["QUANTOZ_API_KEY", "QUANTOZ_ACCOUNT"],
+        "requiresKyc": True,
+        "requiresMainnetFunds": True,
+        "description": "Optional EU production rail for MiCA-aligned euro agent payments.",
+    },
+}
+
+
 PAID_TOOLS: dict[str, dict[str, Any]] = {
     "goplausible.weather": {
         "id": "goplausible.weather",
@@ -129,6 +163,7 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
                         "/events/latest",
                         "/agent/buy-probe",
                         "/agent/tools",
+                        "/agent/rails",
                         "/agent/manifest",
                         "/agent/inspect-tool",
                         "/agent/buy-tool",
@@ -144,6 +179,9 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
             return
         if path == "/agent/tools":
             self._handle_agent_tools()
+            return
+        if path == "/agent/rails":
+            self._handle_agent_rails()
             return
         if path == "/events/latest":
             self._handle_get_latest_event()
@@ -343,6 +381,9 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
                 "nextStep": "POST /agent/inspect-tool with {\"tool\":\"goplausible.weather\"}, then POST /agent/buy-tool.",
             }
         )
+
+    def _handle_agent_rails(self) -> None:
+        self._send_json(_agent_rails())
 
     def _handle_agent_manifest(self) -> None:
         self._send_json(_agent_manifest())
@@ -1200,6 +1241,8 @@ def _agent_manifest() -> dict[str, Any]:
         "x402Version": 2,
         "network": "algorand-testnet",
         "paymentStandard": "x402",
+        "defaultRail": "algorand-testnet-usdc",
+        "paymentRails": list(PAYMENT_RAILS.values()),
         "tools": [_manifest_tool(tool) for tool in PAID_TOOLS.values()],
         "security": {
             "agentPrivateKeyAccess": False,
@@ -1208,14 +1251,29 @@ def _agent_manifest() -> dict[str, Any]:
             "budgetEnforcement": "gateway policy store",
             "replayProtection": "paymentIntent tracking",
             "privateKeyLocation": "local payment executor only",
-            "future": ["ARC-90 exact top-ups", "ARC-58 scoped account abstraction"],
+            "future": [
+                "Quantoz EURD mainnet rail",
+                "ARC-90 exact top-ups",
+                "ARC-58 scoped account abstraction",
+            ],
         },
         "endpoints": {
             "listTools": "/agent/tools",
+            "listPaymentRails": "/agent/rails",
             "inspectTool": "/agent/inspect-tool",
             "buyTool": "/agent/buy-tool",
             "latestEvent": "/events/latest",
         },
+    }
+
+
+def _agent_rails() -> dict[str, Any]:
+    return {
+        "ok": True,
+        "mode": "payment_rail_catalog",
+        "defaultRail": "algorand-testnet-usdc",
+        "rails": list(PAYMENT_RAILS.values()),
+        "note": "Quantoz EURD is exposed as an optional production rail; the live demo stays on TestNet USDC unless Quantoz credentials and mainnet/KYC setup are configured.",
     }
 
 
