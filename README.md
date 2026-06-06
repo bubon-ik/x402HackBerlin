@@ -1,10 +1,10 @@
-# Hermes Sign402
+# SingIt
 
 Hardware-approved x402 payments for agentic commerce on Algorand.
 
 The project goal is to let an AI agent access paid x402-protected resources while keeping payment approval under explicit user control. The agent can request a purchase, but a local gateway and Firefly hardware approval step decide whether a real payment is allowed.
 
-> x402 explains how agents pay. Hermes Sign402 explains how humans safely authorize agents to pay.
+> x402 explains how agents pay. SingIt explains how humans safely authorize agents to pay.
 
 ## What Judges Should Try
 
@@ -26,7 +26,7 @@ Expose the gateway:
 cloudflared tunnel --url http://127.0.0.1:8099
 ```
 
-Give Hermes the tunnel URL, approve the policy on Firefly, then try the parameterized paid tools:
+Give SingIt the tunnel URL, approve the policy on Firefly, then try the parameterized paid tools:
 
 ```text
 buy weather for <city>
@@ -45,7 +45,7 @@ buy qr for text: Hello Berlin
 Expected proof:
 
 - Firefly shows `x402 WEATHER` for weather and `x402 QR CODE` for QR.
-- Hermes returns compact receipts with paid amount, remaining budget, and clickable Lora transaction links.
+- SingIt returns compact receipts with paid amount, remaining budget, and clickable Lora transaction links.
 - The agent never receives the Algorand private key.
 
 Optional Quantoz proof, if the local mainnet EURD wallet env is configured:
@@ -60,11 +60,11 @@ This uses the same Firefly approval step, but settles a real EURD ASA transfer o
 
 x402 makes HTTP `402 Payment Required` usable for AI agents, paid APIs, premium data, on-demand compute, and machine-to-machine commerce. That unlocks agentic commerce, but it also creates a trust problem: an autonomous agent should not receive unlimited wallet access just because it can discover paid resources.
 
-Hermes Sign402 adds the missing consent layer:
+SingIt adds the missing consent layer:
 
 - **Policy control:** Firefly approves a deterministic spending policy hash before the agent can spend.
 - **Payment control:** Firefly approves the exact payment commitment before the gateway executes it.
-- **Private-key isolation:** Hermes never receives the Algorand private key.
+- **Private-key isolation:** SingIt never receives the Algorand private key.
 - **Auditability:** every paid tool call has a policy hash, payment approval hash, tx id, amount, receiver, and remaining budget.
 
 ## Live Proof
@@ -72,7 +72,7 @@ Hermes Sign402 adds the missing consent layer:
 The current demo buys the official GoPlausible weather API through x402 on Algorand TestNet USDC:
 
 ```text
-Telegram command -> Sign402 Gateway -> GoPlausible HTTP 402 -> Firefly approval
+Telegram command -> SingIt Gateway -> GoPlausible HTTP 402 -> Firefly approval
 -> x402-avm PAYMENT-SIGNATURE -> Algorand settlement -> weather result
 ```
 
@@ -84,7 +84,7 @@ Example receipt:
 
 ## Alignment With x402 Themes
 
-- **Agentic commerce:** the user talks to Hermes in Telegram; Hermes discovers and buys a paid resource.
+- **Agentic commerce:** the user talks to SingIt in Telegram; SingIt discovers and buys a paid resource.
 - **Internet-native payments:** the gateway handles the official x402 `402 -> payment -> retry` flow.
 - **Algorand fit:** low fees, fast finality, and USDC support make small paid API calls practical.
 - **Security gap:** Firefly prevents rogue agent spending through hardware-in-the-loop approval.
@@ -93,7 +93,7 @@ Example receipt:
 
 ## Agent Discovery
 
-Hermes and other agents can discover the paid-tool catalog directly from the gateway:
+SingIt and other agents can discover the paid-tool catalog directly from the gateway:
 
 ```text
 GET /agent/manifest
@@ -132,16 +132,16 @@ Example request:
 ```bash
 curl -sS -X POST http://127.0.0.1:8099/agent/pay-eurd \
   -H "Content-Type: application/json" \
-  -d '{"receiver":"<Algorand address>","amount":"0.01","memo":"Hermes EURD demo"}'
+  -d '{"receiver":"<Algorand address>","amount":"0.01","memo":"SingIt EURD demo"}'
 ```
 
-Firefly displays `EURD PAYMENT`, the amount, and the receiver short address before the gateway submits the ASA transfer. Hermes should return only the `telegramText` receipt, which includes a mainnet Lora transaction link.
+Firefly displays `EURD PAYMENT`, the amount, and the receiver short address before the gateway submits the ASA transfer. SingIt should return only the `telegramText` receipt, which includes a mainnet Lora transaction link.
 
 ## Planned Architecture
 
 ```text
-Hermes Telegram agent
-  -> Sign402 Gateway
+SingIt Telegram agent
+  -> SingIt Gateway
   -> Firefly approval layer
   -> x402-avm payment executor
   -> GoPlausible x402 resource
@@ -172,7 +172,7 @@ All core components are implemented and tested against live infrastructure:
 - `demo-resource-server`: local x402-style protected resource for regression and backup demos.
 - `demo-dashboard`: live browser audit trail polling the gateway event endpoint.
 
-Verified end-to-end: GoPlausible weather and QR paid-tool purchases through Hermes Telegram with Firefly approval, Algorand TestNet settlement, compact receipts, and clickable Lora transaction links. The EURD rail is implemented as an optional mainnet transfer endpoint for the Quantoz track.
+Verified end-to-end: GoPlausible weather and QR paid-tool purchases through SingIt Telegram with Firefly approval, Algorand TestNet settlement, compact receipts, and clickable Lora transaction links. The EURD rail is implemented as an optional mainnet transfer endpoint for the Quantoz track.
 
 > **Demo note:** `sign402.qr` reuses the live GoPlausible x402 settlement rail for the hackathon demo. The QR artifact is generated by the gateway after a real USDC x402 payment with Firefly approval. In production each paid tool would have its own merchant receiver, resource URL, and price.
 
