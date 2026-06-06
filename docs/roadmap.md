@@ -98,9 +98,10 @@
 
 ### Later / Milestone
 
-- [ ] Move Algorand signing key into Firefly.
-- [ ] Sign Algorand transactions on Firefly.
+- [ ] Move Algorand signing key into Firefly or a secure hardware signer.
+- [ ] Sign Algorand transactions on hardware after physical approval.
 - [x] Show human-readable payment summary on Firefly.
+- [ ] Add independent x402 merchants for non-weather paid tools.
 - [ ] Add durable replay protection.
 - [ ] Add production-grade gateway auth.
 - [ ] Add mainnet mode.
@@ -232,6 +233,8 @@ Hermes Sign402 is a Telegram AI agent that can pay for x402 resources on Algoran
 - Firefly shows the exact payment context before approval, e.g. `x402 WEATHER`, `0.01 USDC`, `GoPlausible API`, and the short hash.
 - If Firefly rejects, times out, disconnects, or hash mismatches, payment must not be sent.
 - Algorand transaction note links payment to `policyHash` and `paymentIntent`.
+
+Current limitation: Firefly approval is hash approval, not Algorand transaction signing. The local payment executor still holds the signing key in the MVP. The production path is hardware-side transaction signing so a compromised gateway cannot execute payment without a physical device signature.
 
 ## Current Demo Shape
 

@@ -98,6 +98,7 @@ Verified end-to-end: GoPlausible weather and QR paid-tool purchases through Herm
 
 ## Source Of Truth
 
+- [Security model](SECURITY.md)
 - [Project spec](docs/project-spec.md)
 - [Roadmap](docs/roadmap.md)
 
