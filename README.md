@@ -41,6 +41,17 @@ Example receipt:
 - **Discovery future:** `GET /agent/tools` is a minimal local paid-tool catalog that can evolve toward Bazaar/MCP-style resource discovery.
 - **ARC future:** ARC-90 instant top-ups and ARC-58 scoped account abstraction are natural next steps for reducing always-funded agent wallet risk.
 
+## Agent Discovery
+
+Hermes and other agents can discover the paid-tool catalog directly from the gateway:
+
+```text
+GET /agent/manifest
+GET /.well-known/x402.json
+```
+
+The manifest describes available tools, x402 pricing, Algorand asset/network metadata, Firefly approval requirements, and the compact receipt field agents should return to users.
+
 ## Planned Architecture
 
 ```text

@@ -83,13 +83,18 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
                         "/events/latest",
                         "/agent/buy-probe",
                         "/agent/tools",
+                        "/agent/manifest",
                         "/agent/inspect-tool",
                         "/agent/buy-tool",
                         "/agent/inspect-x402",
                         "/agent/buy-x402",
+                        "/.well-known/x402.json",
                     ],
                 }
             )
+            return
+        if path in ("/agent/manifest", "/.well-known/x402.json"):
+            self._handle_agent_manifest()
             return
         if path == "/agent/tools":
             self._handle_agent_tools()
@@ -263,6 +268,9 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
                 "nextStep": "POST /agent/inspect-tool with {\"tool\":\"goplausible.weather\"}, then POST /agent/buy-tool.",
             }
         )
+
+    def _handle_agent_manifest(self) -> None:
+        self._send_json(_agent_manifest())
 
     def _handle_agent_inspect_tool(self) -> None:
         try:
@@ -989,6 +997,56 @@ def _tool_request_context(payload: dict[str, Any]) -> dict[str, Any]:
     if city:
         context["city"] = city
     return context
+
+
+def _agent_manifest() -> dict[str, Any]:
+    return {
+        "name": "Hermes Sign402 Gateway",
+        "description": "Hardware-approved x402 paid tools for agentic commerce on Algorand.",
+        "x402Version": 2,
+        "network": "algorand-testnet",
+        "paymentStandard": "x402",
+        "tools": [_manifest_tool(tool) for tool in PAID_TOOLS.values()],
+        "security": {
+            "agentPrivateKeyAccess": False,
+            "policyApproval": "Firefly required",
+            "paymentApproval": "Firefly required",
+            "budgetEnforcement": "gateway policy store",
+            "replayProtection": "paymentIntent tracking",
+            "privateKeyLocation": "local payment executor only",
+            "future": ["ARC-90 exact top-ups", "ARC-58 scoped account abstraction"],
+        },
+        "endpoints": {
+            "listTools": "/agent/tools",
+            "inspectTool": "/agent/inspect-tool",
+            "buyTool": "/agent/buy-tool",
+            "latestEvent": "/events/latest",
+        },
+    }
+
+
+def _manifest_tool(tool: dict[str, Any]) -> dict[str, Any]:
+    manifest = {
+        "id": tool["id"],
+        "name": tool["name"],
+        "description": tool["description"],
+        "kind": tool["kind"],
+        "source": tool["source"],
+        "resourceUrl": tool["resourceUrl"],
+        "mcpStyleName": tool["mcpStyleName"],
+        "inputSchema": tool["inputSchema"],
+        "paymentStandard": "x402",
+        "network": "algorand-testnet",
+        "asset": "10458941",
+        "assetName": "USDC",
+        "price": "0.01 USDC",
+        "priceAtomic": "10000",
+        "requiresFireflyApproval": True,
+        "inspectEndpoint": "/agent/inspect-tool",
+        "buyEndpoint": "/agent/buy-tool",
+        "receiptField": "telegramText",
+    }
+    return manifest
 
 
 def _tool_result(

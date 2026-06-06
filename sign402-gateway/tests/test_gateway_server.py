@@ -54,6 +54,38 @@ class GatewayServerTests(unittest.TestCase):
     def response_text(self, handler) -> str:
         return handler.response.getvalue().decode("utf-8", "replace")
 
+    def response_json(self, handler) -> dict:
+        response = self.response_text(handler)
+        _, body = response.split("\r\n\r\n", 1)
+        return json.loads(body)
+
+    def test_agent_manifest_exposes_paid_tool_discovery_metadata(self):
+        with patch("sys.stderr", io.StringIO()):
+            handler = self.make_handler("/agent/manifest", method="GET")
+
+        response = self.response_text(handler)
+        body = self.response_json(handler)
+
+        self.assertIn("HTTP/1.0 200 OK", response)
+        self.assertEqual(body["name"], "Hermes Sign402 Gateway")
+        self.assertEqual(body["x402Version"], 2)
+        self.assertEqual(body["network"], "algorand-testnet")
+        self.assertEqual(body["tools"][0]["id"], "goplausible.weather")
+        self.assertEqual(body["tools"][0]["price"], "0.01 USDC")
+        self.assertEqual(body["tools"][0]["asset"], "10458941")
+        self.assertTrue(body["tools"][0]["requiresFireflyApproval"])
+        self.assertEqual(body["tools"][0]["buyEndpoint"], "/agent/buy-tool")
+        self.assertIn("city", body["tools"][0]["inputSchema"]["properties"])
+        self.assertFalse(body["security"]["agentPrivateKeyAccess"])
+        self.assertEqual(body["security"]["paymentApproval"], "Firefly required")
+
+    def test_well_known_x402_manifest_matches_agent_manifest(self):
+        with patch("sys.stderr", io.StringIO()):
+            well_known = self.make_handler("/.well-known/x402.json", method="GET")
+            manifest = self.make_handler("/agent/manifest", method="GET")
+
+        self.assertEqual(self.response_json(well_known), self.response_json(manifest))
+
     def test_approve_payment_uses_firefly(self):
         payment_hash = "b" * 64
         DummyServer.firefly.reset_mock()
