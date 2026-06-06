@@ -22,6 +22,18 @@ Hash ....a1ef
 OK / CANCEL
 ```
 
+The paid QR tool overrides only the human-readable Firefly context:
+
+```text
+x402 QR CODE
+0.01 USDC
+Sign402 Generator
+Hash ....a1ef
+OK / CANCEL
+```
+
+The payment commitment, approved hash, x402 settlement, and policy checks remain unchanged.
+
 ## Endpoints
 
 ```text

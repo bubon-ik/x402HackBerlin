@@ -65,6 +65,10 @@ PAID_TOOLS: dict[str, dict[str, Any]] = {
         "description": "Paid QR code generation for links, text, or agent artifacts.",
         "resourceUrl": "sign402://tools/qr",
         "paymentResourceUrl": "https://x402.goplausible.xyz/examples/weather",
+        "fireflyContext": {
+            "title": "x402 QR CODE",
+            "service": "Sign402 Generator",
+        },
         "command": "buy qr code",
         "mcpStyleName": "create_qr_code",
         "inputSchema": {
@@ -333,7 +337,14 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
             tool = _resolve_paid_tool(payload)
             request_context = _tool_request_context(payload)
             _validate_tool_request(tool, request_context)
-            result = self.server.x402_buyer(_tool_payment_resource_url(tool))
+            firefly_context = tool.get("fireflyContext")
+            if isinstance(firefly_context, dict):
+                result = self.server.x402_buyer(
+                    _tool_payment_resource_url(tool),
+                    firefly_context=firefly_context,
+                )
+            else:
+                result = self.server.x402_buyer(_tool_payment_resource_url(tool))
             enriched = _tool_result(tool, result, request_context)
             enriched["decision"] = result.get("decision", "approved_and_executed")
             enriched["ok"] = bool(result.get("ok", False))
@@ -447,7 +458,7 @@ class Sign402GatewayServer(ThreadingHTTPServer):
         agent_state_store: "AgentStateStore",
         agent_buy_probe: Callable[[str], dict[str, Any]],
         x402_inspector: Callable[[str, str], dict[str, Any]],
-        x402_buyer: Callable[[str], dict[str, Any]],
+        x402_buyer: Callable[..., dict[str, Any]],
     ):
         super().__init__(server_address, handler_class)
         self.firefly = firefly
@@ -732,7 +743,12 @@ class ExternalX402Buyer:
         self.event_store = event_store
         self.agent_state_store = agent_state_store
 
-    def __call__(self, resource_url: str) -> dict[str, Any]:
+    def __call__(
+        self,
+        resource_url: str,
+        *,
+        firefly_context: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
         policy_state = self.agent_state_store.read_policy()
         if policy_state is None:
             raise ValueError("No Firefly-approved policy stored. Call /approve-policy first.")
@@ -751,7 +767,7 @@ class ExternalX402Buyer:
         payment_hash = payment_commitment["paymentHash"]
         approval = self.firefly.approve_payment_hash(
             payment_hash,
-            context_lines=_payment_context_lines(requirement),
+            context_lines=_payment_context_lines(requirement, firefly_context),
         )
         if not approval.get("approved"):
             event = {
@@ -951,13 +967,23 @@ def _read_hash(payload: dict[str, Any], key: str) -> str:
     return value
 
 
-def _payment_context_lines(requirement: dict[str, Any] | None) -> list[str]:
+def _payment_context_lines(
+    requirement: dict[str, Any] | None,
+    display_context: dict[str, Any] | None = None,
+) -> list[str]:
     if not requirement or "amountAtomic" not in requirement:
         return ["x402 PAYMENT", "sign402 approval"]
 
     resource = str(requirement.get("resource", ""))
-    title = "x402 WEATHER" if "weather" in resource.lower() else "x402 PAYMENT"
-    service = "GoPlausible API" if "goplausible" in resource.lower() else "x402 API"
+    display_context = display_context or {}
+    title = str(
+        display_context.get("title")
+        or ("x402 WEATHER" if "weather" in resource.lower() else "x402 PAYMENT")
+    )
+    service = str(
+        display_context.get("service")
+        or ("GoPlausible API" if "goplausible" in resource.lower() else "x402 API")
+    )
     return [
         title,
         _format_display_amount(requirement),
