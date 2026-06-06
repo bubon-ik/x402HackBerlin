@@ -1333,6 +1333,8 @@ def _tool_result(
     result["command"] = tool["command"]
     result["mode"] = "paid_tool_" + str(payload.get("mode", "x402"))
     result.update(request_context)
+    if result.get("decision") == "rejected_by_firefly":
+        result["telegramText"] = "❌ Purchase canceled on Firefly. No payment was made."
     summary = _tool_summary(tool, result, request_context)
     if summary:
         result["summary"] = summary

@@ -717,8 +717,16 @@ class GatewayServerTests(unittest.TestCase):
 
         self.assertFalse(first_body["ok"])
         self.assertEqual(first_body["decision"], "rejected_by_firefly")
+        self.assertEqual(
+            first_body["telegramText"],
+            "❌ Purchase canceled on Firefly. No payment was made.",
+        )
         self.assertFalse(second_body["ok"])
         self.assertEqual(second_body["decision"], "rejected_by_firefly")
+        self.assertEqual(
+            second_body["telegramText"],
+            "❌ Purchase canceled on Firefly. No payment was made.",
+        )
         self.assertTrue(second_body["duplicateSuppressed"])
         self.assertIn("not retried", second_body["message"])
         DummyServer.x402_buyer.assert_called_once_with(
