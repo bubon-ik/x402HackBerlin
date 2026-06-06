@@ -599,44 +599,6 @@ class GatewayServerTests(unittest.TestCase):
         self.assertEqual(saved_event["city"], "Tokyo")
         self.assertEqual(saved_event["summary"]["title"], "Tokyo Weather")
 
-    def test_agent_buy_weather_can_use_latest_paid_forecast_cache(self):
-        DummyServer.x402_buyer.reset_mock()
-        DummyServer.event_store.reset_mock()
-        DummyServer.event_store.read.return_value = {
-            "decision": "approved_and_executed",
-            "ok": True,
-            "mode": "paid_tool_official_x402_avm",
-            "toolId": "goplausible.weather",
-            "resourceUrl": "https://x402.goplausible.xyz/examples/weather",
-            "txId": "TXID",
-            "amountAtomic": "10000",
-            "asset": "10458941",
-            "remainingBudgetAtomic": "990000",
-            "resourceResult": {
-                "forecast": {
-                    "Tokyo": {
-                        "temperature": 55,
-                        "condition": "Clear",
-                    }
-                }
-            },
-        }
-
-        with patch("sys.stderr", io.StringIO()):
-            handler = self.make_handler(
-                "/agent/buy-tool",
-                {"tool": "weather", "city": "Tokyo"},
-            )
-
-        response = self.response_text(handler)
-
-        self.assertIn("HTTP/1.0 200 OK", response)
-        self.assertIn('"decision": "served_from_paid_cache"', response)
-        self.assertIn('"cacheNote": "Returned from the latest paid GoPlausible forecast response; no new payment was sent."', response)
-        self.assertIn('"telegramText": "✅ Tokyo Weather: 55°F, Clear. Paid 0.01 USDC. Tx https://lora.algokit.io/testnet/transaction/TXID. Budget left 0.99 USDC."', response)
-        DummyServer.x402_buyer.assert_not_called()
-        DummyServer.event_store.write.assert_not_called()
-
     def test_agent_buy_tool_summary_allows_missing_city(self):
         DummyServer.x402_buyer.reset_mock()
         DummyServer.event_store.reset_mock()

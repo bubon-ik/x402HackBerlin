@@ -371,10 +371,6 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
             if rejected_retry is not None:
                 self._send_json(rejected_retry)
                 return
-            cached_weather = self._read_cached_weather_tool_result(tool, request_context)
-            if cached_weather is not None:
-                self._send_json(cached_weather)
-                return
         except Exception as exc:
             self._send_json({"decision": "rejected", "ok": False, "error": str(exc)}, status=400)
             return
@@ -503,33 +499,6 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
             return
 
         self.server.firefly_busy = False
-
-    def _read_cached_weather_tool_result(
-        self,
-        tool: dict[str, Any],
-        request_context: dict[str, Any],
-    ) -> dict[str, Any] | None:
-        if tool.get("id") != "goplausible.weather" or not request_context.get("city"):
-            return None
-
-        latest_event = self.server.event_store.read()
-        if not isinstance(latest_event, dict):
-            return None
-        if latest_event.get("toolId") != "goplausible.weather" or not latest_event.get("ok"):
-            return None
-
-        resource_result = latest_event.get("resourceResult")
-        if not isinstance(resource_result, dict):
-            return None
-        if not _weather_for_city(resource_result, str(request_context["city"])):
-            return None
-
-        cached = dict(latest_event)
-        cached["decision"] = "served_from_paid_cache"
-        cached["ok"] = True
-        cached["mode"] = "cached_weather_from_paid_result"
-        cached["cacheNote"] = "Returned from the latest paid GoPlausible forecast response; no new payment was sent."
-        return _tool_result(tool, cached, request_context)
 
     def _read_rejected_tool_retry(
         self,
