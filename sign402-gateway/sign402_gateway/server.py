@@ -5,6 +5,7 @@ import re
 import sys
 import threading
 import time
+from urllib.parse import quote, urlparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable
@@ -55,7 +56,40 @@ PAID_TOOLS: dict[str, dict[str, Any]] = {
             },
             "required": [],
         },
-    }
+    },
+    "sign402.qr": {
+        "id": "sign402.qr",
+        "name": "Sign402 QR Code",
+        "kind": "local_artifact_after_x402_payment",
+        "source": "sign402-gateway",
+        "description": "Paid QR code generation for links, text, or agent artifacts.",
+        "resourceUrl": "sign402://tools/qr",
+        "paymentResourceUrl": "https://x402.goplausible.xyz/examples/weather",
+        "command": "buy qr code",
+        "mcpStyleName": "create_qr_code",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "URL to encode as a QR code.",
+                },
+                "text": {
+                    "type": "string",
+                    "description": "Plain text to encode as a QR code.",
+                },
+                "data": {
+                    "type": "string",
+                    "description": "Generic QR payload.",
+                },
+                "target": {
+                    "type": "string",
+                    "description": "Alias for url/text/data used by agents.",
+                },
+            },
+            "required": [],
+        },
+    },
 }
 
 PAID_TOOL_ALIASES = {
@@ -63,6 +97,11 @@ PAID_TOOL_ALIASES = {
     "goplausible-weather": "goplausible.weather",
     "goplausible_weather": "goplausible.weather",
     "get_weather": "goplausible.weather",
+    "qr": "sign402.qr",
+    "qrcode": "sign402.qr",
+    "qr-code": "sign402.qr",
+    "qr_code": "sign402.qr",
+    "create_qr_code": "sign402.qr",
 }
 
 
@@ -277,7 +316,7 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
             payload = self._read_json()
             tool = _resolve_paid_tool(payload)
             policy_hash = self._policy_hash_from_payload_or_state(payload)
-            inspection = self.server.x402_inspector(str(tool["resourceUrl"]), policy_hash)
+            inspection = self.server.x402_inspector(_tool_payment_resource_url(tool), policy_hash)
             result = _tool_result(tool, inspection, _tool_request_context(payload))
             result["nextStep"] = "If acceptable, POST /agent/buy-tool with the same tool id. Firefly approval is required before payment."
             self._send_json(result)
@@ -292,8 +331,10 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
         try:
             payload = self._read_json()
             tool = _resolve_paid_tool(payload)
-            result = self.server.x402_buyer(str(tool["resourceUrl"]))
-            enriched = _tool_result(tool, result, _tool_request_context(payload))
+            request_context = _tool_request_context(payload)
+            _validate_tool_request(tool, request_context)
+            result = self.server.x402_buyer(_tool_payment_resource_url(tool))
+            enriched = _tool_result(tool, result, request_context)
             enriched["decision"] = result.get("decision", "approved_and_executed")
             enriched["ok"] = bool(result.get("ok", False))
             if enriched.get("ok"):
@@ -993,10 +1034,28 @@ def _resolve_paid_tool(payload: dict[str, Any]) -> dict[str, Any]:
 
 def _tool_request_context(payload: dict[str, Any]) -> dict[str, Any]:
     city = str(payload.get("city") or payload.get("location") or "").strip()
+    qr_data = str(
+        payload.get("url")
+        or payload.get("text")
+        or payload.get("data")
+        or payload.get("target")
+        or ""
+    ).strip()
     context: dict[str, Any] = {}
     if city:
         context["city"] = city
+    if qr_data:
+        context["qrData"] = qr_data
     return context
+
+
+def _validate_tool_request(tool: dict[str, Any], request_context: dict[str, Any]) -> None:
+    if tool.get("id") == "sign402.qr" and not request_context.get("qrData"):
+        raise ValueError("qr tool requires url, text, data, or target")
+
+
+def _tool_payment_resource_url(tool: dict[str, Any]) -> str:
+    return str(tool.get("paymentResourceUrl") or tool["resourceUrl"])
 
 
 def _agent_manifest() -> dict[str, Any]:
@@ -1033,6 +1092,7 @@ def _manifest_tool(tool: dict[str, Any]) -> dict[str, Any]:
         "kind": tool["kind"],
         "source": tool["source"],
         "resourceUrl": tool["resourceUrl"],
+        "paymentResourceUrl": _tool_payment_resource_url(tool),
         "mcpStyleName": tool["mcpStyleName"],
         "inputSchema": tool["inputSchema"],
         "paymentStandard": "x402",
@@ -1063,6 +1123,7 @@ def _tool_result(
         "source": tool["source"],
         "description": tool["description"],
         "resourceUrl": tool["resourceUrl"],
+        "paymentResourceUrl": _tool_payment_resource_url(tool),
         "mcpStyleName": tool["mcpStyleName"],
         "inputSchema": tool["inputSchema"],
     }
@@ -1084,6 +1145,8 @@ def _tool_summary(
     request_context: dict[str, Any],
 ) -> dict[str, Any] | None:
     if tool.get("id") != "goplausible.weather" or not result.get("ok"):
+        if tool.get("id") == "sign402.qr" and result.get("ok"):
+            return _qr_tool_summary(result, request_context)
         return None
 
     city = request_context.get("city")
@@ -1110,6 +1173,47 @@ def _tool_summary(
     if weather:
         summary.update(weather)
     return summary
+
+
+def _qr_tool_summary(result: dict[str, Any], request_context: dict[str, Any]) -> dict[str, Any]:
+    qr_data = str(request_context.get("qrData") or "")
+    qr_image_url = _qr_image_url(qr_data)
+    display_target = _qr_display_target(qr_data)
+    result["qrData"] = qr_data
+    result["qrImageUrl"] = qr_image_url
+    result["displayTarget"] = display_target
+
+    amount = _format_tool_amount(result.get("amountAtomic"), result.get("asset"), result)
+    remaining_budget = _format_tool_amount(
+        result.get("remainingBudgetAtomic"),
+        result.get("asset"),
+        result,
+    )
+    return {
+        "title": "QR Code",
+        "status": str(result.get("decision", "approved_and_executed")),
+        "amount": amount,
+        "remainingBudget": remaining_budget,
+        "txId": str(result.get("txId") or ""),
+        "detail": f"created for {display_target}",
+        "qrData": qr_data,
+        "qrImageUrl": qr_image_url,
+    }
+
+
+def _qr_image_url(qr_data: str) -> str:
+    return "https://api.qrserver.com/v1/create-qr-code/?size=256x256&data=" + quote(
+        qr_data,
+        safe="",
+    )
+
+
+def _qr_display_target(qr_data: str) -> str:
+    parsed = urlparse(qr_data)
+    if parsed.netloc:
+        path = parsed.path.rstrip("/")
+        return parsed.netloc + path
+    return qr_data[:64] + ("..." if len(qr_data) > 64 else "")
 
 
 def _weather_for_city(resource_result: dict[str, Any], city: str | None) -> dict[str, str]:
@@ -1157,15 +1261,19 @@ def _format_tool_amount(amount_atomic: Any, asset: Any, result: dict[str, Any]) 
 
 def _telegram_text(summary: dict[str, Any]) -> str:
     title = summary["title"]
-    weather_bits = [
-        str(summary[key])
-        for key in ("temperature", "condition")
-        if summary.get(key)
-    ]
-    weather_text = ": " + ", ".join(weather_bits) if weather_bits else ""
+    detail = str(summary.get("detail") or "")
+    if detail:
+        result_text = " " + detail
+    else:
+        weather_bits = [
+            str(summary[key])
+            for key in ("temperature", "condition")
+            if summary.get(key)
+        ]
+        result_text = ": " + ", ".join(weather_bits) if weather_bits else ""
     tx_id = str(summary.get("txId", ""))
     return (
-        f"✅ {title}{weather_text}. "
+        f"✅ {title}{result_text}. "
         f"Paid {summary.get('amount', '')}. "
         f"Tx {tx_id}. "
         f"Budget left {summary.get('remainingBudget', '')}."

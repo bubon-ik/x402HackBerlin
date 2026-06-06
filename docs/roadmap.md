@@ -160,12 +160,17 @@ This proves the project can understand and pay a live official GoPlausible/x402-
 official 402 -> Firefly approval hash -> x402-avm paymentGroup -> PAYMENT-SIGNATURE -> facilitator settlement -> 200 OK
 ```
 
-The first paid tool is:
+The first paid tools are:
 
 ```text
 tool: goplausible.weather
 MCP-style name: get_weather
 resource: https://x402.goplausible.xyz/examples/weather
+
+tool: sign402.qr
+MCP-style name: create_qr_code
+input: url/text/data/target
+artifact: qrImageUrl
 ```
 
 This makes the main agent experience tool-oriented:

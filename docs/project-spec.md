@@ -643,7 +643,7 @@ This removes the need for long per-run Hermes instructions.
 agent lists/inspects paid tool -> reads price, asset, receiver, and payment hash -> Firefly approval -> official x402 payment -> paid tool result
 ```
 
-The first built-in paid tool is:
+The first built-in paid tools are:
 
 ```json
 {
@@ -651,6 +651,16 @@ The first built-in paid tool is:
   "name": "GoPlausible Weather",
   "mcpStyleName": "get_weather",
   "resourceUrl": "https://x402.goplausible.xyz/examples/weather"
+}
+```
+
+```json
+{
+  "id": "sign402.qr",
+  "name": "Sign402 QR Code",
+  "mcpStyleName": "create_qr_code",
+  "resourceUrl": "sign402://tools/qr",
+  "paymentResourceUrl": "https://x402.goplausible.xyz/examples/weather"
 }
 ```
 
@@ -663,6 +673,17 @@ Hermes can inspect it with:
 ```
 
 Then execute it with the same body at `POST /agent/buy-tool`. Internally this uses the same official GoPlausible/x402-v2 purchase path as `/agent/buy-x402`, but it presents the experience as a paid tool call rather than a hardcoded URL purchase. This is the bridge toward MCP/Bazaar-style discovery.
+
+Hermes can also buy a QR artifact with:
+
+```json
+{
+  "tool": "qr",
+  "url": "https://github.com/bubon-ik/x402HackBerlin"
+}
+```
+
+The QR tool still requires the same Firefly-approved x402 payment path, then the gateway returns a compact `telegramText` receipt and a `qrImageUrl` artifact for Telegram or the dashboard.
 
 `POST /agent/inspect-x402` is the GoPlausible/x402-v2 compatibility checkpoint. Hermes or a developer can send:
 

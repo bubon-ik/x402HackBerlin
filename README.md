@@ -52,6 +52,11 @@ GET /.well-known/x402.json
 
 The manifest describes available tools, x402 pricing, Algorand asset/network metadata, Firefly approval requirements, and the compact receipt field agents should return to users.
 
+Current paid tools:
+
+- `goplausible.weather` / `get_weather`: buy a weather lookup through the official GoPlausible x402 resource.
+- `sign402.qr` / `create_qr_code`: buy QR code generation for a URL or text payload after the same Firefly-approved x402 payment flow.
+
 ## Planned Architecture
 
 ```text

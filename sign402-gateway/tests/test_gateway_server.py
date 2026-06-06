@@ -76,6 +76,10 @@ class GatewayServerTests(unittest.TestCase):
         self.assertTrue(body["tools"][0]["requiresFireflyApproval"])
         self.assertEqual(body["tools"][0]["buyEndpoint"], "/agent/buy-tool")
         self.assertIn("city", body["tools"][0]["inputSchema"]["properties"])
+        qr_tool = next(tool for tool in body["tools"] if tool["id"] == "sign402.qr")
+        self.assertEqual(qr_tool["mcpStyleName"], "create_qr_code")
+        self.assertIn("url", qr_tool["inputSchema"]["properties"])
+        self.assertEqual(qr_tool["paymentResourceUrl"], "https://x402.goplausible.xyz/examples/weather")
         self.assertFalse(body["security"]["agentPrivateKeyAccess"])
         self.assertEqual(body["security"]["paymentApproval"], "Firefly required")
 
@@ -436,6 +440,57 @@ class GatewayServerTests(unittest.TestCase):
         self.assertIn("HTTP/1.0 200 OK", response)
         self.assertIn('"title": "Weather"', response)
         self.assertIn('"telegramText": "✅ Weather: 55°F, Clear. Paid 0.01 USDC. Tx TXID. Budget left 0.99 USDC."', response)
+
+    def test_agent_buy_qr_tool_generates_qr_receipt_after_x402_payment(self):
+        DummyServer.x402_buyer.reset_mock()
+        DummyServer.event_store.reset_mock()
+        DummyServer.x402_buyer.return_value = {
+            "decision": "approved_and_executed",
+            "ok": True,
+            "resourceUrl": "https://x402.goplausible.xyz/examples/weather",
+            "txId": "TXID",
+            "amountAtomic": "10000",
+            "asset": "10458941",
+            "remainingBudgetAtomic": "990000",
+            "resourceResult": {
+                "temperature": "55°F",
+                "condition": "Clear",
+            },
+        }
+
+        with patch("sys.stderr", io.StringIO()):
+            handler = self.make_handler(
+                "/agent/buy-tool",
+                {"tool": "qr", "url": "https://github.com/bubon-ik/x402HackBerlin"},
+            )
+
+        response = self.response_text(handler)
+
+        self.assertIn("HTTP/1.0 200 OK", response)
+        self.assertIn('"toolName": "Sign402 QR Code"', response)
+        self.assertIn('"qrData": "https://github.com/bubon-ik/x402HackBerlin"', response)
+        self.assertIn('"qrImageUrl": "https://api.qrserver.com/v1/create-qr-code/?size=256x256&data=https%3A%2F%2Fgithub.com%2Fbubon-ik%2Fx402HackBerlin"', response)
+        self.assertIn('"telegramText": "✅ QR Code created for github.com/bubon-ik/x402HackBerlin. Paid 0.01 USDC. Tx TXID. Budget left 0.99 USDC."', response)
+        DummyServer.x402_buyer.assert_called_once_with(
+            "https://x402.goplausible.xyz/examples/weather"
+        )
+        DummyServer.event_store.write.assert_called_once()
+        saved_event = DummyServer.event_store.write.call_args.args[0]
+        self.assertEqual(saved_event["toolId"], "sign402.qr")
+        self.assertEqual(saved_event["qrData"], "https://github.com/bubon-ik/x402HackBerlin")
+        self.assertIn("qrImageUrl", saved_event)
+
+    def test_agent_buy_qr_tool_requires_data_before_payment(self):
+        DummyServer.x402_buyer.reset_mock()
+
+        with patch("sys.stderr", io.StringIO()):
+            handler = self.make_handler("/agent/buy-tool", {"tool": "qr"})
+
+        response = self.response_text(handler)
+
+        self.assertIn("HTTP/1.0 400 Bad Request", response)
+        self.assertIn("qr tool requires url, text, data, or target", response)
+        DummyServer.x402_buyer.assert_not_called()
 
     def test_external_x402_buyer_sends_human_payment_context_to_firefly(self):
         from sign402_gateway.server import ExternalX402Buyer

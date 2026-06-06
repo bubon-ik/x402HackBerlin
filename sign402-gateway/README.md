@@ -66,7 +66,7 @@ POST /approve-policy
 POST /agent/buy-tool
 ```
 
-For the official GoPlausible weather demo, Hermes can inspect and buy the paid tool:
+Hermes can inspect and buy paid tools:
 
 ```bash
 curl -sS http://127.0.0.1:8099/agent/tools
@@ -78,9 +78,13 @@ curl -sS -X POST http://127.0.0.1:8099/agent/inspect-tool \
 curl -sS -X POST http://127.0.0.1:8099/agent/buy-tool \
   -H "Content-Type: application/json" \
   -d '{"tool":"goplausible.weather"}'
+
+curl -sS -X POST http://127.0.0.1:8099/agent/buy-tool \
+  -H "Content-Type: application/json" \
+  -d '{"tool":"qr","url":"https://github.com/bubon-ik/x402HackBerlin"}'
 ```
 
-The paid-tool endpoints wrap the official `/agent/buy-x402` path so the agent workflow is tool-oriented rather than URL-oriented. `/agent/buy-probe` remains available for the local probe demo.
+The paid-tool endpoints wrap the official `/agent/buy-x402` payment path so the agent workflow is tool-oriented rather than URL-oriented. The QR tool uses the same Firefly-approved x402 payment flow, then returns a compact Telegram receipt and a `qrImageUrl` artifact. `/agent/buy-probe` remains available for the local probe demo.
 
 ## Manual Run
 
