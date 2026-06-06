@@ -46,6 +46,7 @@ DEFAULT_TESTNET_ALGOD_URLS = [
     "https://testnet-api.algonode.cloud",
     "https://testnet-api.4160.nodely.dev",
     "https://testnet-api.algonode.network",
+    "https://algorand-testnet-algod.gateway.tatum.io",
 ]
 EURD_ASA_ID = 1221682136
 EURD_ASSET_DECIMALS = 2
