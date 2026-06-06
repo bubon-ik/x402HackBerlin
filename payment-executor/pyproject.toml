@@ -1,0 +1,12 @@
+[project]
+name = "sign402-payment-executor"
+version = "0.1.0"
+description = "Algorand TestNet payment executor for Hermes Sign402"
+requires-python = ">=3.11"
+dependencies = [
+  "py-algorand-sdk>=2.0.0",
+  "x402-avm[avm,requests]>=2.0.2"
+]
+
+[project.scripts]
+sign402-executor = "sign402_executor.cli:main"
