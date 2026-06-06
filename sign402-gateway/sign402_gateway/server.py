@@ -39,6 +39,11 @@ HEX_32_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 MAX_REQUEST_BODY_BYTES = 64 * 1024
 MAX_QR_DATA_CHARS = 2048
 REJECTED_TOOL_RETRY_SUPPRESSION_SECONDS = 120.0
+DEFAULT_TESTNET_ALGOD_URLS = [
+    "https://testnet-api.algonode.cloud",
+    "https://testnet-api.4160.nodely.dev",
+    "https://testnet-api.algonode.network",
+]
 
 
 PAID_TOOLS: dict[str, dict[str, Any]] = {
@@ -635,15 +640,29 @@ def build_x402_payment_signature_builder(payment_executor_dir: Path):
     env = _read_env(payment_executor_dir / ".env")
     sender = env["ALGORAND_SENDER"]
     private_key = env["ALGORAND_PRIVATE_KEY"]
-    algod_url = env.get("ALGOD_URL", "https://testnet-api.algonode.cloud")
+    algod_urls = _dedupe_strings(
+        [
+            env.get("ALGOD_URL", ""),
+            *str(env.get("ALGOD_FALLBACK_URLS", "")).split(","),
+            *DEFAULT_TESTNET_ALGOD_URLS,
+        ]
+    )
 
     def build_signature(payment_required: dict[str, Any]) -> dict[str, Any]:
-        return build_x402_avm_payment_signature_header(
-            payment_required=payment_required,
-            sender=sender,
-            private_key=private_key,
-            algod_url=algod_url,
-        )
+        errors: list[str] = []
+        for algod_url in algod_urls:
+            try:
+                return build_x402_avm_payment_signature_header(
+                    payment_required=payment_required,
+                    sender=sender,
+                    private_key=private_key,
+                    algod_url=algod_url,
+                )
+            except Exception as exc:
+                if not _is_temporary_x402_payment_error(exc):
+                    raise
+                errors.append(f"{algod_url}: {type(exc).__name__}: {exc}")
+        raise RuntimeError("x402 payment signature failed on all algod endpoints: " + " | ".join(errors))
 
     return build_signature
 
@@ -883,10 +902,9 @@ class ExternalX402Buyer:
         if str(approval.get("approvedHash", "")).lower() != payment_hash:
             raise ValueError("Firefly approved hash does not match payment commitment hash.")
 
-        payment_signature = self.payment_signature_builder(raw_payment_required)
         resource_result = _fetch_x402_paid_resource_with_retry(
             resource_url,
-            payment_signature_header=payment_signature["headerValue"],
+            payment_signature_builder=lambda: self.payment_signature_builder(raw_payment_required),
         )
         if int(resource_result.get("status", 0)) != 200:
             raise ValueError(f"Official x402 resource denied payment: {resource_result}")
@@ -929,15 +947,23 @@ class ExternalX402Buyer:
 def _fetch_x402_paid_resource_with_retry(
     resource_url: str,
     *,
-    payment_signature_header: str,
+    payment_signature_builder: Callable[[], dict[str, Any]],
     max_attempts: int = 3,
     retry_delay_seconds: float = 2.0,
 ) -> dict[str, Any]:
     last_result: dict[str, Any] = {}
     for attempt in range(max_attempts):
+        try:
+            payment_signature = payment_signature_builder()
+        except Exception as exc:
+            if not _is_temporary_x402_payment_error(exc) or attempt >= max_attempts - 1:
+                raise
+            time.sleep(retry_delay_seconds)
+            continue
+
         last_result = fetch_x402_paid_resource(
             resource_url,
-            payment_signature_header=payment_signature_header,
+            payment_signature_header=payment_signature["headerValue"],
         )
         status = int(last_result.get("status", 0))
         if status == 200:
@@ -947,6 +973,17 @@ def _fetch_x402_paid_resource_with_retry(
         if attempt < max_attempts - 1:
             time.sleep(retry_delay_seconds)
     return last_result
+
+
+def _is_temporary_x402_payment_error(error: Exception) -> bool:
+    message = str(error).lower()
+    return (
+        "403" in message
+        or "forbidden" in message
+        or "temporar" in message
+        or "rate limit" in message
+        or type(error).__name__ in {"AlgodHTTPError", "HTTPError", "URLError"}
+    )
 
 
 class LatestEventStore:
@@ -1118,6 +1155,18 @@ def _read_env(path: Path) -> dict[str, str]:
         key, value = line.split("=", 1)
         env[key] = value.strip().strip('"')
     return env
+
+
+def _dedupe_strings(values: list[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        normalized = value.strip()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        result.append(normalized)
+    return result
 
 
 def _read_hash(payload: dict[str, Any], key: str) -> str:
