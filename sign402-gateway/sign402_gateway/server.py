@@ -1,4 +1,5 @@
 import argparse
+import hashlib
 import ipaddress
 import json
 import os
@@ -29,7 +30,11 @@ from sign402_live.flow import build_payment_commitment
 from sign402_live.http_resource import X402ResourceClient
 from sign402_bridge.firefly import FireflyClient, find_firefly_port
 from sign402_bridge.policy import canonicalize_policy, hash_policy
-from sign402_executor.executor import build_x402_avm_payment_signature_header, execute_payment
+from sign402_executor.executor import (
+    build_x402_avm_payment_signature_header,
+    execute_asset_transfer,
+    execute_payment,
+)
 from x402_demo.core import encode_payment_proof
 
 from .goplausible import fetch_x402_paid_resource, fetch_x402_payment_required, normalize_x402_payment_required
@@ -37,6 +42,11 @@ from .goplausible import fetch_x402_paid_resource, fetch_x402_payment_required, 
 HEX_32_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 MAX_REQUEST_BODY_BYTES = 64 * 1024
 MAX_QR_DATA_CHARS = 2048
+EURD_ASA_ID = 1221682136
+EURD_ASSET_DECIMALS = 2
+EURD_NETWORK = "algorand-mainnet"
+EURD_MAX_AMOUNT_ATOMIC = 100
+DEFAULT_QUANTOZ_WALLET_ENV_PATH = ROOT_DIR.parent / "quantoz-mainnet-wallet.env"
 
 
 PAYMENT_RAILS: dict[str, dict[str, Any]] = {
@@ -57,18 +67,18 @@ PAYMENT_RAILS: dict[str, dict[str, Any]] = {
     "quantoz-eurd-mainnet": {
         "id": "quantoz-eurd-mainnet",
         "name": "Quantoz EURD MainNet",
-        "status": "production_ready_optional",
+        "status": "live_optional",
         "network": "algorand-mainnet",
-        "scheme": "euro",
+        "scheme": "exact-asa-transfer",
         "asset": "EURD",
         "assetId": "1221682136",
         "assetDecimals": 2,
         "facilitator": "https://x402algo.ai.quantozpay.com",
         "sdk": "@ever_amsterdam/x402-euro-eurd",
-        "requiredEnv": ["QUANTOZ_API_KEY", "QUANTOZ_ACCOUNT"],
+        "requiredEnv": ["QUANTOZ_WALLET_ENV"],
         "requiresKyc": True,
         "requiresMainnetFunds": True,
-        "description": "Optional EU production rail for MiCA-aligned euro agent payments.",
+        "description": "Optional live EURD mainnet transfer rail for MiCA-aligned euro agent payments.",
     },
 }
 
@@ -167,6 +177,7 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
                         "/agent/manifest",
                         "/agent/inspect-tool",
                         "/agent/buy-tool",
+                        "/agent/pay-eurd",
                         "/agent/inspect-x402",
                         "/agent/buy-x402",
                         "/.well-known/x402.json",
@@ -207,6 +218,9 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
             return
         if path == "/agent/buy-tool":
             self._handle_agent_buy_tool()
+            return
+        if path == "/agent/pay-eurd":
+            self._handle_agent_pay_eurd()
             return
         if path == "/agent/inspect-x402":
             self._handle_agent_inspect_x402()
@@ -431,6 +445,83 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
         finally:
             self._release_firefly()
 
+    def _handle_agent_pay_eurd(self) -> None:
+        if not self._acquire_firefly():
+            self._send_json(_busy_payload(), status=409)
+            return
+
+        try:
+            payload = self._read_json()
+            request = _eurd_payment_request(payload)
+            payment_hash = _hash_json(request["paymentCommitment"])
+            approval = self.server.firefly.approve_payment_hash(
+                payment_hash,
+                context_lines=[
+                    "EURD PAYMENT",
+                    _format_eurd_amount(request["amountAtomic"]),
+                    _short_address(request["receiver"]),
+                ],
+            )
+            if not approval.get("approved"):
+                event = {
+                    "decision": "rejected_by_firefly",
+                    "ok": False,
+                    "mode": "quantoz_eurd_mainnet_transfer",
+                    "paymentApprovalHash": payment_hash,
+                    "receiver": request["receiver"],
+                    "amountAtomic": str(request["amountAtomic"]),
+                    "amount": _format_eurd_amount(request["amountAtomic"]),
+                    "asset": "EURD",
+                    "assetId": str(EURD_ASA_ID),
+                    "network": EURD_NETWORK,
+                    "firefly": approval,
+                    "telegramText": "❌ EURD payment canceled on Firefly. No payment was made.",
+                }
+                self.server.event_store.write(event)
+                self._send_json(event, status=400)
+                return
+
+            if str(approval.get("approvedHash", "")).lower() != payment_hash:
+                raise ValueError("Firefly approved hash does not match EURD payment hash.")
+
+            note = f"sign402-eurd:{payment_hash[:16]}".encode("utf-8")
+            payment = self.server.eurd_payment_executor(
+                receiver=request["receiver"],
+                amount_atomic=request["amountAtomic"],
+                note=note,
+            )
+            tx_id = str(payment["txId"])
+            tx_url = _transaction_display_url(tx_id, network="mainnet")
+            event = {
+                "decision": "approved_and_executed",
+                "ok": True,
+                "mode": "quantoz_eurd_mainnet_transfer",
+                "paymentApprovalHash": payment_hash,
+                "paymentCommitment": request["paymentCommitment"],
+                "receiver": request["receiver"],
+                "amountAtomic": str(request["amountAtomic"]),
+                "amount": _format_eurd_amount(request["amountAtomic"]),
+                "asset": "EURD",
+                "assetId": str(EURD_ASA_ID),
+                "network": EURD_NETWORK,
+                "txId": tx_id,
+                "txUrl": tx_url,
+                "payment": payment,
+                "firefly": approval,
+                "telegramText": (
+                    f"✅ EURD paid: {_format_eurd_amount(request['amountAtomic'])}. "
+                    f"Tx {tx_url}."
+                ),
+            }
+            self.server.event_store.write(event)
+            self._send_json(event)
+        except TimeoutError:
+            self._send_json(_firefly_timeout_payload(decision=True), status=504)
+        except Exception as exc:
+            self._send_json({"decision": "rejected", "ok": False, "error": str(exc)}, status=400)
+        finally:
+            self._release_firefly()
+
     def _handle_agent_inspect_x402(self) -> None:
         try:
             payload = self._read_json()
@@ -542,6 +633,7 @@ class Sign402GatewayServer(ThreadingHTTPServer):
         agent_buy_probe: Callable[[str], dict[str, Any]],
         x402_inspector: Callable[[str, str], dict[str, Any]],
         x402_buyer: Callable[..., dict[str, Any]],
+        eurd_payment_executor: Callable[..., dict[str, Any]],
     ):
         super().__init__(server_address, handler_class)
         self.firefly = firefly
@@ -551,6 +643,7 @@ class Sign402GatewayServer(ThreadingHTTPServer):
         self.agent_buy_probe = agent_buy_probe
         self.x402_inspector = x402_inspector
         self.x402_buyer = x402_buyer
+        self.eurd_payment_executor = eurd_payment_executor
         self.firefly_lock = threading.Lock()
 
 
@@ -570,6 +663,7 @@ def build_server(
     event_store = LatestEventStore(event_store_path)
     agent_state_store = AgentStateStore(agent_state_path)
     x402_inspector = ExternalX402Inspector()
+    eurd_payment_executor = build_eurd_payment_executor()
     x402_buyer = ExternalX402Buyer(
         firefly=firefly,
         payment_signature_builder=x402_payment_signature_builder,
@@ -593,6 +687,7 @@ def build_server(
         agent_buy_probe=agent_buy_probe,
         x402_inspector=x402_inspector,
         x402_buyer=x402_buyer,
+        eurd_payment_executor=eurd_payment_executor,
     )
 
 
@@ -631,6 +726,41 @@ def build_x402_payment_signature_builder(payment_executor_dir: Path):
         )
 
     return build_signature
+
+
+def build_eurd_payment_executor(wallet_env_path: Path | None = None):
+    from algosdk.v2client.algod import AlgodClient
+
+    path = wallet_env_path or Path(os.getenv("QUANTOZ_WALLET_ENV", DEFAULT_QUANTOZ_WALLET_ENV_PATH))
+    if not path.exists():
+        def unavailable_pay(*, receiver: str, amount_atomic: int, note: bytes | None = None) -> dict[str, Any]:
+            raise RuntimeError(
+                f"Quantoz EURD wallet env not found at {path}. Set QUANTOZ_WALLET_ENV to enable /agent/pay-eurd."
+            )
+
+        return unavailable_pay
+
+    env = _read_env(path)
+    algod_client = AlgodClient("", env.get("ALGOD_URL", "https://mainnet-api.algonode.cloud"))
+    sender = env.get("ALGORAND_MAINNET_ADDRESS") or env.get("ALGORAND_SENDER")
+    private_key = env["ALGORAND_PRIVATE_KEY"]
+    if not sender:
+        raise ValueError("Quantoz wallet env must include ALGORAND_MAINNET_ADDRESS or ALGORAND_SENDER")
+
+    def pay(*, receiver: str, amount_atomic: int, note: bytes | None = None) -> dict[str, Any]:
+        return execute_asset_transfer(
+            algod_client=algod_client,
+            sender=sender,
+            private_key=private_key,
+            receiver=receiver,
+            asset_id=EURD_ASA_ID,
+            amount_atomic=amount_atomic,
+            note=note,
+            network=EURD_NETWORK,
+            asset_name="EURD",
+        )
+
+    return pay
 
 
 def main() -> None:
@@ -1160,6 +1290,77 @@ def _validate_payment_requirements(requirement: Any) -> None:
         raise ValueError("paymentRequirements.amountAtomic must be positive")
 
 
+def _eurd_payment_request(payload: dict[str, Any]) -> dict[str, Any]:
+    receiver = str(
+        payload.get("receiver")
+        or payload.get("to")
+        or payload.get("payTo")
+        or ""
+    ).strip()
+    if not receiver:
+        raise ValueError("receiver is required")
+
+    amount_atomic = _parse_eurd_amount(payload)
+    if amount_atomic <= 0:
+        raise ValueError("EURD amount must be positive")
+    if amount_atomic > EURD_MAX_AMOUNT_ATOMIC:
+        raise ValueError(
+            f"EURD amount exceeds demo max of {_format_eurd_amount(EURD_MAX_AMOUNT_ATOMIC)}"
+        )
+
+    memo = str(payload.get("memo") or payload.get("message") or "Hermes Sign402 EURD payment").strip()
+    commitment = {
+        "type": "sign402-eurd-payment",
+        "network": EURD_NETWORK,
+        "asset": "EURD",
+        "assetId": str(EURD_ASA_ID),
+        "assetDecimals": EURD_ASSET_DECIMALS,
+        "amountAtomic": str(amount_atomic),
+        "receiver": receiver,
+        "memo": memo[:160],
+    }
+    return {
+        "receiver": receiver,
+        "amountAtomic": amount_atomic,
+        "memo": memo,
+        "paymentCommitment": commitment,
+    }
+
+
+def _parse_eurd_amount(payload: dict[str, Any]) -> int:
+    if payload.get("amountAtomic") is not None:
+        try:
+            return int(str(payload["amountAtomic"]))
+        except ValueError as exc:
+            raise ValueError("amountAtomic must be an integer") from exc
+
+    raw_amount = str(payload.get("amount") or payload.get("eurd") or "").strip()
+    if not raw_amount:
+        raise ValueError("amount or amountAtomic is required")
+    normalized = raw_amount.removesuffix("EURD").removesuffix("eurd").strip()
+    if not re.fullmatch(r"\d+(\.\d{1,2})?", normalized):
+        raise ValueError("EURD amount must have at most 2 decimal places")
+    whole, _, fraction = normalized.partition(".")
+    return int(whole) * (10**EURD_ASSET_DECIMALS) + int(fraction.ljust(EURD_ASSET_DECIMALS, "0") or "0")
+
+
+def _format_eurd_amount(amount_atomic: int) -> str:
+    whole = amount_atomic // (10**EURD_ASSET_DECIMALS)
+    fraction = amount_atomic % (10**EURD_ASSET_DECIMALS)
+    return f"{whole}.{str(fraction).zfill(EURD_ASSET_DECIMALS)} EURD"
+
+
+def _hash_json(payload: dict[str, Any]) -> str:
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _short_address(address: str) -> str:
+    if len(address) <= 16:
+        return address
+    return f"{address[:8]}...{address[-6:]}"
+
+
 def _resolve_paid_tool(payload: dict[str, Any]) -> dict[str, Any]:
     raw_tool = str(
         payload.get("tool")
@@ -1262,8 +1463,23 @@ def _agent_manifest() -> dict[str, Any]:
             "listPaymentRails": "/agent/rails",
             "inspectTool": "/agent/inspect-tool",
             "buyTool": "/agent/buy-tool",
+            "payEurd": "/agent/pay-eurd",
             "latestEvent": "/events/latest",
         },
+        "directPayments": [
+            {
+                "id": "quantoz.eurd.transfer",
+                "name": "Quantoz EURD Transfer",
+                "rail": "quantoz-eurd-mainnet",
+                "network": EURD_NETWORK,
+                "asset": "EURD",
+                "assetId": str(EURD_ASA_ID),
+                "assetDecimals": EURD_ASSET_DECIMALS,
+                "endpoint": "/agent/pay-eurd",
+                "requiresFireflyApproval": True,
+                "receiptField": "telegramText",
+            }
+        ],
     }
 
 
@@ -1273,7 +1489,7 @@ def _agent_rails() -> dict[str, Any]:
         "mode": "payment_rail_catalog",
         "defaultRail": "algorand-testnet-usdc",
         "rails": list(PAYMENT_RAILS.values()),
-        "note": "Quantoz EURD is exposed as an optional production rail; the live demo stays on TestNet USDC unless Quantoz credentials and mainnet/KYC setup are configured.",
+        "note": "Quantoz EURD is exposed as an optional live mainnet transfer rail through POST /agent/pay-eurd. The default paid tools stay on TestNet USDC.",
     }
 
 
@@ -1474,12 +1690,13 @@ def _telegram_text(summary: dict[str, Any]) -> str:
     )
 
 
-def _transaction_display_url(tx_id: str) -> str:
+def _transaction_display_url(tx_id: str, *, network: str = "testnet") -> str:
     if not tx_id:
         return ""
     if tx_id.startswith(("http://", "https://")):
         return tx_id
-    return f"https://lora.algokit.io/testnet/transaction/{quote(tx_id, safe='')}"
+    lora_network = "mainnet" if network == "mainnet" else "testnet"
+    return f"https://lora.algokit.io/{lora_network}/transaction/{quote(tx_id, safe='')}"
 
 
 def _busy_payload() -> dict[str, Any]:

@@ -5,6 +5,7 @@ from sign402_executor.executor import (
     build_x402_avm_payment_signature_header,
     build_payment_signature_header,
     build_payment_note,
+    execute_asset_transfer,
     execute_payment,
     opt_in_asset,
     validate_payment_request,
@@ -218,6 +219,43 @@ class ExecutorTests(unittest.TestCase):
         tx.sign.assert_called_once_with("PRIVATE_KEY")
         algod.send_transaction.assert_called_once_with(signed_tx)
         self.assertEqual(result, {"txId": "OPTIN_TXID", "assetId": "10458941"})
+
+    def test_execute_asset_transfer_builds_and_submits_asa_tx(self):
+        algod = Mock()
+        algod.suggested_params.return_value = "SUGGESTED_PARAMS"
+        algod.send_transaction.return_value = "ASSET_TXID"
+        signed_tx = Mock()
+
+        with patch("sign402_executor.executor.AssetTransferTxn") as asset_transfer_txn:
+            tx = asset_transfer_txn.return_value
+            tx.sign.return_value = signed_tx
+            result = execute_asset_transfer(
+                algod_client=algod,
+                sender="SENDER_ADDRESS",
+                private_key="PRIVATE_KEY",
+                receiver="RECEIVER_ADDRESS",
+                asset_id=1221682136,
+                amount_atomic=1,
+                note=b"sign402-eurd:abc",
+                network="algorand-mainnet",
+                asset_name="EURD",
+            )
+
+        asset_transfer_txn.assert_called_once_with(
+            sender="SENDER_ADDRESS",
+            sp="SUGGESTED_PARAMS",
+            receiver="RECEIVER_ADDRESS",
+            amt=1,
+            index=1221682136,
+            note=b"sign402-eurd:abc",
+        )
+        tx.sign.assert_called_once_with("PRIVATE_KEY")
+        algod.send_transaction.assert_called_once_with(signed_tx)
+        self.assertEqual(result["txId"], "ASSET_TXID")
+        self.assertEqual(result["network"], "algorand-mainnet")
+        self.assertEqual(result["asset"], "EURD")
+        self.assertEqual(result["assetId"], "1221682136")
+        self.assertEqual(result["amountAtomic"], "1")
 
 
 if __name__ == "__main__":

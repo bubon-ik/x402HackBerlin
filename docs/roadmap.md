@@ -105,7 +105,8 @@
 - [ ] Add durable replay protection.
 - [ ] Add production-grade gateway auth.
 - [x] Add Quantoz EURD production rail metadata.
-- [ ] Add live Quantoz EURD mainnet mode after KYC/API credentials are ready.
+- [x] Add optional live Quantoz EURD mainnet transfer mode.
+- [ ] Rehearse `/agent/pay-eurd` through Hermes Telegram with Firefly approval.
 
 ## Current Stage
 
@@ -125,6 +126,7 @@ We have a working official x402 paid-tool demo:
   - `GET /agent/tools`
   - `POST /agent/inspect-tool`
   - `POST /agent/buy-tool`
+  - `POST /agent/pay-eurd`
   - `GET /events/latest`
 - The x402 demo resource server returns `402 Payment Required` with a fresh `paymentIntent` for each unpaid request.
 - The payment executor sends real Algorand TestNet payments.
