@@ -1298,12 +1298,21 @@ def _telegram_text(summary: dict[str, Any]) -> str:
         ]
         result_text = ": " + ", ".join(weather_bits) if weather_bits else ""
     tx_id = str(summary.get("txId", ""))
+    tx_display = _transaction_display_url(tx_id)
     return (
         f"✅ {title}{result_text}. "
         f"Paid {summary.get('amount', '')}. "
-        f"Tx {tx_id}. "
+        f"Tx {tx_display}. "
         f"Budget left {summary.get('remainingBudget', '')}."
     )
+
+
+def _transaction_display_url(tx_id: str) -> str:
+    if not tx_id:
+        return ""
+    if tx_id.startswith(("http://", "https://")):
+        return tx_id
+    return f"https://lora.algokit.io/testnet/transaction/{quote(tx_id, safe='')}"
 
 
 def _busy_payload() -> dict[str, Any]:

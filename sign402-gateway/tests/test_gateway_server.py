@@ -404,7 +404,7 @@ class GatewayServerTests(unittest.TestCase):
         self.assertIn('"toolName": "GoPlausible Weather"', response)
         self.assertIn('"city": "Tokyo"', response)
         self.assertIn('"title": "Tokyo Weather"', response)
-        self.assertIn('"telegramText": "✅ Tokyo Weather: 55°F, Clear. Paid 0.01 USDC. Tx TXID. Budget left 0.99 USDC."', response)
+        self.assertIn('"telegramText": "✅ Tokyo Weather: 55°F, Clear. Paid 0.01 USDC. Tx https://lora.algokit.io/testnet/transaction/TXID. Budget left 0.99 USDC."', response)
         DummyServer.x402_buyer.assert_called_once_with(
             "https://x402.goplausible.xyz/examples/weather"
         )
@@ -439,7 +439,7 @@ class GatewayServerTests(unittest.TestCase):
 
         self.assertIn("HTTP/1.0 200 OK", response)
         self.assertIn('"title": "Weather"', response)
-        self.assertIn('"telegramText": "✅ Weather: 55°F, Clear. Paid 0.01 USDC. Tx TXID. Budget left 0.99 USDC."', response)
+        self.assertIn('"telegramText": "✅ Weather: 55°F, Clear. Paid 0.01 USDC. Tx https://lora.algokit.io/testnet/transaction/TXID. Budget left 0.99 USDC."', response)
 
     def test_agent_buy_qr_tool_generates_qr_receipt_after_x402_payment(self):
         DummyServer.x402_buyer.reset_mock()
@@ -470,7 +470,7 @@ class GatewayServerTests(unittest.TestCase):
         self.assertIn('"toolName": "Sign402 QR Code"', response)
         self.assertIn('"qrData": "https://github.com/bubon-ik/x402HackBerlin"', response)
         self.assertIn('"qrImageUrl": "https://api.qrserver.com/v1/create-qr-code/?size=256x256&data=https%3A%2F%2Fgithub.com%2Fbubon-ik%2Fx402HackBerlin"', response)
-        self.assertIn('"telegramText": "✅ QR Code created for github.com/bubon-ik/x402HackBerlin. Paid 0.01 USDC. Tx TXID. Budget left 0.99 USDC."', response)
+        self.assertIn('"telegramText": "✅ QR Code created for github.com/bubon-ik/x402HackBerlin. Paid 0.01 USDC. Tx https://lora.algokit.io/testnet/transaction/TXID. Budget left 0.99 USDC."', response)
         DummyServer.x402_buyer.assert_called_once_with(
             "https://x402.goplausible.xyz/examples/weather",
             firefly_context={
