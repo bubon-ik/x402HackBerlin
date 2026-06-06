@@ -37,7 +37,7 @@ Current repo state:
 - `sign402-bridge` has landed as the Firefly approval layer;
 - `payment-executor` has landed as the Algorand/x402 payment execution layer;
 - `live-demo` has landed as the strict demo orchestration layer;
-- the gateway expects the demo resource module to land in a follow-up commit.
+- `demo-resource-server`, `demo-dashboard`, and `scripts` have landed for local demo packaging.
 
 ## Source Of Truth
 
@@ -77,6 +77,12 @@ Live demo tests:
 
 ```bash
 PYTHONPATH=live-demo python3 -m unittest discover -s live-demo/tests
+```
+
+Demo resource tests:
+
+```bash
+PYTHONPATH=demo-resource-server python3 -m unittest discover -s demo-resource-server/tests
 ```
 
 ## Demo Flow

@@ -225,7 +225,7 @@ curl -X POST http://127.0.0.1:8099/events/latest \
 The default event store is:
 
 ```text
-/Users/mp/Documents/Berlin Hack/demo-dashboard/latest-run.json
+demo-dashboard/latest-run.json
 ```
 
 ## Safety

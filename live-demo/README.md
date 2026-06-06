@@ -16,8 +16,7 @@ Firefly-approved policyHash
 ## Terminal 1: Firefly Bridge
 
 ```bash
-cd "/Users/mp/Documents/Berlin Hack/sign402-bridge"
-FIREFLY_PORT=/dev/cu.usbmodem11301 /Users/mp/.espressif/python_env/idf5.3_py3.14_env/bin/python -m sign402_bridge
+PYTHONPATH=sign402-bridge FIREFLY_PORT=/dev/cu.usbmodem11301 python3 -m sign402_bridge
 ```
 
 If the Firefly port changes:
@@ -42,8 +41,7 @@ https://<tunnel>.trycloudflare.com/approve-payment
 ## Terminal 3: x402 Resource Server
 
 ```bash
-cd "/Users/mp/Documents/Berlin Hack/demo-resource-server"
-X402_MERCHANT_RECEIVER=ERUMW536MUKV7T2JHM35HUQADFIW4SLELUPBNVR4CBJH34WRD7XMHADD6A python3 -m x402_demo
+PYTHONPATH=demo-resource-server X402_MERCHANT_RECEIVER=ERUMW536MUKV7T2JHM35HUQADFIW4SLELUPBNVR4CBJH34WRD7XMHADD6A python3 -m x402_demo
 ```
 
 ## Step 1: Fresh Firefly Approval
@@ -64,10 +62,9 @@ Confirm the hash on Firefly matches Hermes.
 Use the `policyHash` from Hermes. For strict Firefly mode, pass the local bridge URL:
 
 ```bash
-cd "/Users/mp/Documents/Berlin Hack/live-demo"
-../payment-executor/.venv/bin/python -m sign402_live \
+PYTHONPATH=live-demo:payment-executor python3 -m sign402_live \
   --policy-hash <POLICY_HASH_FROM_HERMES> \
-  --payment-executor-dir ../payment-executor \
+  --payment-executor-dir payment-executor \
   --resource-url http://127.0.0.1:8090 \
   --firefly-bridge-url http://127.0.0.1:8088 \
   --target algorand.co
