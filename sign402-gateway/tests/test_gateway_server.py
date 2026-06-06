@@ -17,6 +17,7 @@ class DummyServer:
     agent_buy_probe = Mock()
     x402_inspector = Mock()
     x402_buyer = Mock()
+    eurd_payment_executor = Mock()
 
 
 class FakeSocket:
@@ -44,6 +45,7 @@ class GatewayServerTests(unittest.TestCase):
             DummyServer.agent_buy_probe,
             DummyServer.x402_inspector,
             DummyServer.x402_buyer,
+            DummyServer.eurd_payment_executor,
         ):
             mock.reset_mock(return_value=True, side_effect=True)
 
@@ -89,6 +91,14 @@ class GatewayServerTests(unittest.TestCase):
         self.assertEqual(body["name"], "Hermes Sign402 Gateway")
         self.assertEqual(body["x402Version"], 2)
         self.assertEqual(body["network"], "algorand-testnet")
+        quantoz_rail = next(rail for rail in body["paymentRails"] if rail["id"] == "quantoz-eurd-mainnet")
+        self.assertEqual(quantoz_rail["asset"], "EURD")
+        self.assertEqual(quantoz_rail["assetId"], "1221682136")
+        self.assertEqual(quantoz_rail["facilitator"], "https://x402algo.ai.quantozpay.com")
+        self.assertTrue(quantoz_rail["requiresKyc"])
+        self.assertEqual(quantoz_rail["status"], "live_optional")
+        self.assertEqual(body["endpoints"]["payEurd"], "/agent/pay-eurd")
+        self.assertEqual(body["directPayments"][0]["id"], "quantoz.eurd.transfer")
         self.assertEqual(body["tools"][0]["id"], "goplausible.weather")
         self.assertEqual(body["tools"][0]["price"], "0.01 USDC")
         self.assertEqual(body["tools"][0]["asset"], "10458941")
@@ -99,6 +109,12 @@ class GatewayServerTests(unittest.TestCase):
         self.assertEqual(qr_tool["mcpStyleName"], "create_qr_code")
         self.assertIn("url", qr_tool["inputSchema"]["properties"])
         self.assertEqual(qr_tool["paymentResourceUrl"], "https://x402.goplausible.xyz/examples/weather")
+        eurd_tool = next(tool for tool in body["tools"] if tool["id"] == "quantoz.eurd.transfer")
+        self.assertEqual(eurd_tool["mcpStyleName"], "pay_eurd")
+        self.assertEqual(eurd_tool["paymentStandard"], "sign402-direct-transfer")
+        self.assertEqual(eurd_tool["network"], "algorand-mainnet")
+        self.assertEqual(eurd_tool["assetName"], "EURD")
+        self.assertEqual(eurd_tool["buyEndpoint"], "/agent/pay-eurd")
         self.assertFalse(body["security"]["agentPrivateKeyAccess"])
         self.assertEqual(body["security"]["paymentApproval"], "Firefly required")
 
@@ -108,6 +124,26 @@ class GatewayServerTests(unittest.TestCase):
             manifest = self.make_handler("/agent/manifest", method="GET")
 
         self.assertEqual(self.response_json(well_known), self.response_json(manifest))
+
+    def test_agent_rails_exposes_quantoz_eurd_production_rail(self):
+        with patch("sys.stderr", io.StringIO()):
+            handler = self.make_handler("/agent/rails", method="GET")
+
+        response = self.response_text(handler)
+        body = self.response_json(handler)
+
+        self.assertIn("HTTP/1.0 200 OK", response)
+        self.assertTrue(body["ok"])
+        self.assertEqual(body["defaultRail"], "algorand-testnet-usdc")
+        quantoz_rail = next(rail for rail in body["rails"] if rail["id"] == "quantoz-eurd-mainnet")
+        self.assertEqual(quantoz_rail["network"], "algorand-mainnet")
+        self.assertEqual(quantoz_rail["asset"], "EURD")
+        self.assertEqual(quantoz_rail["assetId"], "1221682136")
+        self.assertEqual(quantoz_rail["scheme"], "exact-asa-transfer")
+        self.assertEqual(quantoz_rail["facilitator"], "https://x402algo.ai.quantozpay.com")
+        self.assertEqual(quantoz_rail["sdk"], "@ever_amsterdam/x402-euro-eurd")
+        self.assertIn("QUANTOZ_WALLET_ENV", quantoz_rail["requiredEnv"])
+        self.assertTrue(quantoz_rail["requiresKyc"])
 
     def test_approve_payment_uses_firefly(self):
         payment_hash = "b" * 64
@@ -761,6 +797,155 @@ class GatewayServerTests(unittest.TestCase):
         self.assertIn("HTTP/1.0 400 Bad Request", response)
         self.assertIn("qr payload must be at most 2048 characters", response)
         DummyServer.x402_buyer.assert_not_called()
+
+    def test_agent_pay_eurd_uses_firefly_and_mainnet_executor(self):
+        DummyServer.firefly.reset_mock()
+        DummyServer.eurd_payment_executor.reset_mock()
+        DummyServer.event_store.reset_mock()
+
+        def approve_payment_hash(payment_hash, context_lines=None):
+            return {
+                "approved": True,
+                "approvedHash": payment_hash,
+                "deviceModel": 262,
+                "deviceSerial": 1056,
+            }
+
+        DummyServer.firefly.approve_payment_hash.side_effect = approve_payment_hash
+        DummyServer.eurd_payment_executor.return_value = {
+            "txId": "EURD_TXID",
+            "network": "algorand-mainnet",
+            "receiver": "RECEIVER_ADDRESS",
+            "amountAtomic": "1",
+            "asset": "EURD",
+            "assetId": "1221682136",
+            "note": "sign402-eurd:abc",
+        }
+
+        with patch("sys.stderr", io.StringIO()):
+            handler = self.make_handler(
+                "/agent/pay-eurd",
+                {
+                    "receiver": "RECEIVER_ADDRESS",
+                    "amount": "0.01",
+                    "memo": "Hackathon EURD test",
+                },
+            )
+
+        response = self.response_text(handler)
+        body = self.response_json(handler)
+
+        self.assertIn("HTTP/1.0 200 OK", response)
+        self.assertTrue(body["ok"])
+        self.assertEqual(body["asset"], "EURD")
+        self.assertEqual(body["assetId"], "1221682136")
+        self.assertEqual(body["amount"], "0.01 EURD")
+        self.assertEqual(body["txUrl"], "https://lora.algokit.io/mainnet/transaction/EURD_TXID")
+        self.assertEqual(
+            body["telegramText"],
+            "✅ EURD paid: 0.01 EURD. Tx https://lora.algokit.io/mainnet/transaction/EURD_TXID.",
+        )
+        DummyServer.firefly.approve_payment_hash.assert_called_once()
+        self.assertEqual(
+            DummyServer.firefly.approve_payment_hash.call_args.kwargs["context_lines"],
+            ["EURD PAYMENT", "0.01 EURD", "RECEIVER_ADDRESS"],
+        )
+        DummyServer.eurd_payment_executor.assert_called_once()
+        self.assertEqual(DummyServer.eurd_payment_executor.call_args.kwargs["receiver"], "RECEIVER_ADDRESS")
+        self.assertEqual(DummyServer.eurd_payment_executor.call_args.kwargs["amount_atomic"], 1)
+        DummyServer.event_store.write.assert_called_once()
+
+    def test_agent_pay_eurd_cancel_does_not_execute_payment(self):
+        DummyServer.firefly.reset_mock()
+        DummyServer.eurd_payment_executor.reset_mock()
+        DummyServer.event_store.reset_mock()
+        DummyServer.firefly.approve_payment_hash.return_value = {
+            "approved": False,
+            "approvedHash": "",
+        }
+
+        with patch("sys.stderr", io.StringIO()):
+            handler = self.make_handler(
+                "/agent/pay-eurd",
+                {
+                    "receiver": "RECEIVER_ADDRESS",
+                    "amountAtomic": "1",
+                },
+            )
+
+        response = self.response_text(handler)
+        body = self.response_json(handler)
+
+        self.assertIn("HTTP/1.0 400 Bad Request", response)
+        self.assertFalse(body["ok"])
+        self.assertEqual(body["decision"], "rejected_by_firefly")
+        self.assertEqual(body["telegramText"], "❌ EURD payment canceled on Firefly. No payment was made.")
+        DummyServer.eurd_payment_executor.assert_not_called()
+        DummyServer.event_store.write.assert_called_once()
+
+    def test_agent_pay_eurd_rejects_more_than_two_decimals_before_firefly(self):
+        DummyServer.firefly.reset_mock()
+        DummyServer.eurd_payment_executor.reset_mock()
+
+        with patch("sys.stderr", io.StringIO()):
+            handler = self.make_handler(
+                "/agent/pay-eurd",
+                {
+                    "receiver": "RECEIVER_ADDRESS",
+                    "amount": "0.001",
+                },
+            )
+
+        response = self.response_text(handler)
+
+        self.assertIn("HTTP/1.0 400 Bad Request", response)
+        self.assertIn("at most 2 decimal places", response)
+        DummyServer.firefly.approve_payment_hash.assert_not_called()
+        DummyServer.eurd_payment_executor.assert_not_called()
+
+    def test_agent_buy_tool_eurd_alias_uses_direct_transfer_not_x402_buyer(self):
+        DummyServer.firefly.reset_mock()
+        DummyServer.eurd_payment_executor.reset_mock()
+        DummyServer.x402_buyer.reset_mock()
+        DummyServer.event_store.reset_mock()
+
+        def approve_payment_hash(payment_hash, context_lines=None):
+            return {
+                "approved": True,
+                "approvedHash": payment_hash,
+            }
+
+        DummyServer.firefly.approve_payment_hash.side_effect = approve_payment_hash
+        DummyServer.eurd_payment_executor.return_value = {
+            "txId": "EURD_TOOL_TXID",
+            "network": "algorand-mainnet",
+            "receiver": "RECEIVER_ADDRESS",
+            "amountAtomic": "1",
+            "asset": "EURD",
+            "assetId": "1221682136",
+        }
+
+        with patch("sys.stderr", io.StringIO()):
+            handler = self.make_handler(
+                "/agent/buy-tool",
+                {
+                    "tool": "eurd",
+                    "receiver": "RECEIVER_ADDRESS",
+                    "amount": "0.01",
+                    "memo": "Hermes EURD demo",
+                },
+            )
+
+        response = self.response_text(handler)
+        body = self.response_json(handler)
+
+        self.assertIn("HTTP/1.0 200 OK", response)
+        self.assertTrue(body["ok"])
+        self.assertEqual(body["toolId"], "quantoz.eurd.transfer")
+        self.assertEqual(body["telegramText"], "✅ EURD paid: 0.01 EURD. Tx https://lora.algokit.io/mainnet/transaction/EURD_TOOL_TXID.")
+        DummyServer.x402_buyer.assert_not_called()
+        DummyServer.eurd_payment_executor.assert_called_once()
+        DummyServer.event_store.write.assert_called_once()
 
     def test_gateway_rejects_oversized_json_body(self):
         DummyServer.x402_buyer.reset_mock()

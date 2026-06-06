@@ -277,3 +277,46 @@ def opt_in_asset(
     signed_tx = tx.sign(private_key)
     tx_id = algod_client.send_transaction(signed_tx)
     return {"txId": tx_id, "assetId": str(asset_id)}
+
+
+def execute_asset_transfer(
+    *,
+    algod_client,
+    sender: str,
+    private_key: str,
+    receiver: str,
+    asset_id: int,
+    amount_atomic: int,
+    note: bytes | None = None,
+    network: str = "algorand-mainnet",
+    asset_name: str = "ASA",
+) -> dict[str, Any]:
+    if AssetTransferTxn is None:
+        raise RuntimeError("py-algorand-sdk is required. Install with: python3 -m pip install py-algorand-sdk")
+    if amount_atomic <= 0:
+        raise ValueError("amount_atomic must be positive")
+    if not receiver:
+        raise ValueError("receiver is required")
+
+    tx_kwargs: dict[str, Any] = {
+        "sender": sender,
+        "sp": algod_client.suggested_params(),
+        "receiver": receiver,
+        "amt": int(amount_atomic),
+        "index": int(asset_id),
+    }
+    if note is not None:
+        tx_kwargs["note"] = note
+
+    tx = AssetTransferTxn(**tx_kwargs)
+    signed_tx = tx.sign(private_key)
+    tx_id = algod_client.send_transaction(signed_tx)
+    return {
+        "txId": tx_id,
+        "network": network,
+        "receiver": receiver,
+        "amountAtomic": str(int(amount_atomic)),
+        "asset": asset_name,
+        "assetId": str(int(asset_id)),
+        "note": note.decode("utf-8") if note else "",
+    }

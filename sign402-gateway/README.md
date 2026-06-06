@@ -75,6 +75,7 @@ Hermes uses two product endpoints:
 ```text
 POST /approve-policy
 POST /agent/buy-tool
+POST /agent/pay-eurd
 ```
 
 Hermes can inspect and buy paid tools:
@@ -93,9 +94,15 @@ curl -sS -X POST http://127.0.0.1:8099/agent/buy-tool \
 curl -sS -X POST http://127.0.0.1:8099/agent/buy-tool \
   -H "Content-Type: application/json" \
   -d '{"tool":"qr","url":"https://github.com/bubon-ik/x402HackBerlin"}'
+
+curl -sS -X POST http://127.0.0.1:8099/agent/pay-eurd \
+  -H "Content-Type: application/json" \
+  -d '{"receiver":"<Algorand address>","amount":"0.01","memo":"Hermes EURD demo"}'
 ```
 
 The paid-tool endpoints wrap the official `/agent/buy-x402` payment path so the agent workflow is tool-oriented rather than URL-oriented. The QR tool uses the same Firefly-approved x402 payment flow, then returns a compact Telegram receipt and a `qrImageUrl` artifact. `/agent/buy-probe` remains available for the local probe demo.
+
+`/agent/pay-eurd` is the optional Quantoz track endpoint. It requires a whitelisted Algorand MainNet wallet env via `QUANTOZ_WALLET_ENV`, asks Firefly to approve the EURD payment hash, then sends the EURD ASA transfer locally. Hermes should return the `telegramText` field only.
 
 ## Manual Run
 
