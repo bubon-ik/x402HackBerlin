@@ -42,6 +42,16 @@ flowchart LR
 
 ## What Judges Should Try
 
+### Voice Demo Moment
+
+Say this to SingIt:
+
+```text
+buy weather for New York
+```
+
+SingIt turns the voice intent into a paid x402 tool call, but it still cannot spend by itself. Firefly shows the exact payment, the user approves it physically, and only then does the local gateway submit the transaction.
+
 Once the local gateway tunnel is connected to SingIt, try three commands:
 
 ```text
