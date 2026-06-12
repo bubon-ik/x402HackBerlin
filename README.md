@@ -1,4 +1,4 @@
-# Hermes Sign402
+
 
 Hardware-approved x402 payments for an AI agent on Algorand and Base.
 
