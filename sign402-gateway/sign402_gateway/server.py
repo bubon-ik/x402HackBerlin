@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 import re
+import subprocess
 import sys
 import threading
 import time
@@ -17,6 +18,8 @@ LIVE_DEMO_DIR = ROOT_DIR / "live-demo"
 DEMO_RESOURCE_SERVER_DIR = ROOT_DIR / "demo-resource-server"
 DEFAULT_EVENT_STORE_PATH = ROOT_DIR / "demo-dashboard" / "latest-run.json"
 DEFAULT_AGENT_STATE_PATH = ROOT_DIR / "demo-dashboard" / "agent-state.json"
+DEFAULT_CDP_X402_SERVICE_DIR = ROOT_DIR / "cdp-x402-service"
+BASE_USDC_MAINNET = "0x833589fCD6eDb6E08f4c7C32D4f71b54bDa02913"
 
 for package_dir in (SIGN402_BRIDGE_DIR, PAYMENT_EXECUTOR_DIR, LIVE_DEMO_DIR, DEMO_RESOURCE_SERVER_DIR):
     package_path = str(package_dir)
@@ -35,6 +38,32 @@ from .goplausible import fetch_x402_paid_resource, fetch_x402_payment_required, 
 HEX_32_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 
 
+PAID_TOOLS: dict[str, dict[str, Any]] = {
+    "goplausible.weather": {
+        "id": "goplausible.weather",
+        "name": "GoPlausible Weather",
+        "kind": "external_x402_resource",
+        "source": "goplausible-x402",
+        "description": "Paid weather forecast API exposed through official x402 on Algorand.",
+        "resourceUrl": "https://x402.goplausible.xyz/examples/weather",
+        "command": "buy goplausible weather",
+        "mcpStyleName": "get_weather",
+        "inputSchema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    }
+}
+
+PAID_TOOL_ALIASES = {
+    "weather": "goplausible.weather",
+    "goplausible-weather": "goplausible.weather",
+    "goplausible_weather": "goplausible.weather",
+    "get_weather": "goplausible.weather",
+}
+
+
 class Sign402GatewayHandler(BaseHTTPRequestHandler):
     server_version = "Sign402Gateway/0.1"
 
@@ -51,11 +80,17 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
                         "/execute-payment",
                         "/events/latest",
                         "/agent/buy-probe",
+                        "/agent/tools",
+                        "/agent/inspect-tool",
+                        "/agent/buy-tool",
                         "/agent/inspect-x402",
                         "/agent/buy-x402",
                     ],
                 }
             )
+            return
+        if path == "/agent/tools":
+            self._handle_agent_tools()
             return
         if path == "/events/latest":
             self._handle_get_latest_event()
@@ -78,6 +113,12 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
             return
         if path == "/agent/buy-probe":
             self._handle_agent_buy_probe()
+            return
+        if path == "/agent/inspect-tool":
+            self._handle_agent_inspect_tool()
+            return
+        if path == "/agent/buy-tool":
+            self._handle_agent_buy_tool()
             return
         if path == "/agent/inspect-x402":
             self._handle_agent_inspect_x402()
@@ -211,6 +252,48 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
         finally:
             self._release_firefly()
 
+    def _handle_agent_tools(self) -> None:
+        self._send_json(
+            {
+                "ok": True,
+                "mode": "paid_tool_catalog",
+                "tools": list(PAID_TOOLS.values()),
+                "nextStep": "POST /agent/inspect-tool with {\"tool\":\"goplausible.weather\"}, then POST /agent/buy-tool.",
+            }
+        )
+
+    def _handle_agent_inspect_tool(self) -> None:
+        try:
+            payload = self._read_json()
+            tool = _resolve_paid_tool(payload)
+            policy_hash = self._policy_hash_from_payload_or_state(payload)
+            inspection = self.server.x402_inspector(str(tool["resourceUrl"]), policy_hash)
+            result = _tool_result(tool, inspection)
+            result["nextStep"] = "If acceptable, POST /agent/buy-tool with the same tool id. Firefly approval is required before payment."
+            self._send_json(result)
+        except Exception as exc:
+            self._send_json({"ok": False, "error": str(exc)}, status=400)
+
+    def _handle_agent_buy_tool(self) -> None:
+        if not self._acquire_firefly():
+            self._send_json(_busy_payload(), status=409)
+            return
+
+        try:
+            payload = self._read_json()
+            tool = _resolve_paid_tool(payload)
+            result = self.server.x402_buyer(str(tool["resourceUrl"]))
+            enriched = _tool_result(tool, result)
+            enriched["decision"] = result.get("decision", "approved_and_executed")
+            enriched["ok"] = bool(result.get("ok", False))
+            if enriched.get("ok"):
+                self.server.event_store.write(enriched)
+            self._send_json(enriched)
+        except Exception as exc:
+            self._send_json({"decision": "rejected", "ok": False, "error": str(exc)}, status=400)
+        finally:
+            self._release_firefly()
+
     def _handle_agent_inspect_x402(self) -> None:
         try:
             payload = self._read_json()
@@ -335,16 +418,19 @@ def build_server(
     event_store_path: Path = DEFAULT_EVENT_STORE_PATH,
     agent_state_path: Path = DEFAULT_AGENT_STATE_PATH,
     resource_base_url: str = "http://127.0.0.1:8090",
+    cdp_x402_service_dir: Path = DEFAULT_CDP_X402_SERVICE_DIR,
 ) -> Sign402GatewayServer:
     firefly = FireflyClient(port=firefly_port)
     payment_executor = build_payment_executor(payment_executor_dir)
     x402_payment_signature_builder = build_x402_payment_signature_builder(payment_executor_dir)
+    base_payment_client = CdpBaseX402PaymentClient(cdp_x402_service_dir)
     event_store = LatestEventStore(event_store_path)
     agent_state_store = AgentStateStore(agent_state_path)
     x402_inspector = ExternalX402Inspector()
     x402_buyer = ExternalX402Buyer(
         firefly=firefly,
         payment_signature_builder=x402_payment_signature_builder,
+        base_payment_client=base_payment_client,
         event_store=event_store,
         agent_state_store=agent_state_store,
     )
@@ -429,6 +515,11 @@ def main() -> None:
         "--resource-base-url",
         default=os.getenv("SIGN402_RESOURCE_BASE_URL", "http://127.0.0.1:8090"),
     )
+    parser.add_argument(
+        "--cdp-x402-service-dir",
+        type=Path,
+        default=Path(os.getenv("SIGN402_CDP_X402_SERVICE_DIR", DEFAULT_CDP_X402_SERVICE_DIR)),
+    )
     args = parser.parse_args()
 
     firefly_port = args.firefly_port or find_firefly_port()
@@ -440,6 +531,7 @@ def main() -> None:
         event_store_path=args.event_store_path,
         agent_state_path=args.agent_state_path,
         resource_base_url=args.resource_base_url,
+        cdp_x402_service_dir=args.cdp_x402_service_dir,
     )
 
     print(f"Sign402 gateway listening on http://{args.host}:{args.port}")
@@ -448,6 +540,7 @@ def main() -> None:
     print(f"Event store path: {args.event_store_path}")
     print(f"Agent state path: {args.agent_state_path}")
     print(f"Resource base URL: {args.resource_base_url}")
+    print(f"CDP x402 service dir: {args.cdp_x402_service_dir}")
     server.serve_forever()
 
 
@@ -590,11 +683,13 @@ class ExternalX402Buyer:
         *,
         firefly: FireflyClient,
         payment_signature_builder: Callable[[dict[str, Any]], dict[str, Any]],
+        base_payment_client: Callable[[str], dict[str, Any]] | None = None,
         event_store: "LatestEventStore",
         agent_state_store: "AgentStateStore",
     ):
         self.firefly = firefly
         self.payment_signature_builder = payment_signature_builder
+        self.base_payment_client = base_payment_client
         self.event_store = event_store
         self.agent_state_store = agent_state_store
 
@@ -635,16 +730,29 @@ class ExternalX402Buyer:
         if str(approval.get("approvedHash", "")).lower() != payment_hash:
             raise ValueError("Firefly approved hash does not match payment commitment hash.")
 
-        payment_signature = self.payment_signature_builder(raw_payment_required)
-        resource_result = fetch_x402_paid_resource(
-            resource_url,
-            payment_signature_header=payment_signature["headerValue"],
-        )
+        if requirement["network"] == "base-mainnet":
+            if self.base_payment_client is None:
+                raise ValueError("Base Mainnet x402 payments require the CDP payment client.")
+            resource_result = self.base_payment_client(resource_url)
+            mode = "official_x402_base_cdp"
+        else:
+            payment_signature = self.payment_signature_builder(raw_payment_required)
+            resource_result = fetch_x402_paid_resource(
+                resource_url,
+                payment_signature_header=payment_signature["headerValue"],
+            )
+            mode = "official_x402_avm"
+
         if int(resource_result.get("status", 0)) != 200:
             raise ValueError(f"Official x402 resource denied payment: {resource_result}")
 
         payment_response = resource_result.get("paymentResponse", {})
-        tx_id = payment_response.get("transaction")
+        tx_id = (
+            payment_response.get("transaction")
+            or payment_response.get("transactionHash")
+            or payment_response.get("txHash")
+            or resource_result.get("transactionHash")
+        )
         self.agent_state_store.record_payment(
             policy_hash,
             requirement["paymentIntent"],
@@ -654,7 +762,7 @@ class ExternalX402Buyer:
         event = {
             "decision": "approved_and_executed",
             "ok": True,
-            "mode": "official_x402_avm",
+            "mode": mode,
             "resourceUrl": resource_url,
             "policyHash": policy_hash,
             "paymentApprovalHash": payment_hash,
@@ -676,6 +784,35 @@ class ExternalX402Buyer:
         }
         self.event_store.write(event)
         return event
+
+
+class CdpBaseX402PaymentClient:
+    def __init__(self, service_dir: Path):
+        self.service_dir = service_dir
+
+    def __call__(self, resource_url: str) -> dict[str, Any]:
+        script = self.service_dir / "src" / "index.mjs"
+        if not script.exists():
+            raise ValueError(f"CDP x402 service script not found: {script}")
+
+        result = subprocess.run(
+            ["node", str(script), "buy", "--url", resource_url],
+            cwd=str(self.service_dir),
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=120,
+        )
+        if result.returncode != 0:
+            message = result.stderr.strip() or result.stdout.strip() or "CDP x402 service failed"
+            raise ValueError(message)
+        try:
+            payload = json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            raise ValueError("CDP x402 service returned non-JSON output") from exc
+        if not isinstance(payload, dict):
+            raise ValueError("CDP x402 service returned non-object JSON")
+        return payload
 
 
 class LatestEventStore:
@@ -749,7 +886,7 @@ class AgentStateStore:
             raise ValueError("amountAtomic exceeds maxPerPaymentAtomic")
         if spent + amount > max_budget:
             raise ValueError("amountAtomic exceeds remaining budget")
-        if str(requirement["asset"]) != str(policy["asset"]):
+        if not _asset_matches(str(requirement["asset"]), str(policy["asset"])):
             raise ValueError("asset does not match policy.asset")
         if str(requirement.get("purpose")) != str(policy["allowedPurpose"]):
             raise ValueError("purpose does not match policy.allowedPurpose")
@@ -844,6 +981,9 @@ def _format_display_amount(requirement: dict[str, Any]) -> str:
     if asset == "10458941" and not asset_name:
         asset_name = "USDC"
         decimals = 6
+    elif asset.lower() == BASE_USDC_MAINNET.lower() and not asset_name:
+        asset_name = "USDC"
+        decimals = 6
     elif asset == "ALGO_TEST":
         asset_name = "ALGO"
         decimals = 6
@@ -862,6 +1002,12 @@ def _format_display_amount(requirement: dict[str, Any]) -> str:
     return f"{whole}.{fraction_text} {asset_name}"
 
 
+def _asset_matches(requirement_asset: str, policy_asset: str) -> bool:
+    if requirement_asset.startswith("0x") or policy_asset.startswith("0x"):
+        return requirement_asset.lower() == policy_asset.lower()
+    return requirement_asset == policy_asset
+
+
 def _validate_payment_requirements(requirement: Any) -> None:
     if not isinstance(requirement, dict):
         raise ValueError("paymentRequirements must be an object")
@@ -876,6 +1022,45 @@ def _validate_payment_requirements(requirement: Any) -> None:
     amount = int(str(requirement.get("amountAtomic", "0")))
     if amount <= 0:
         raise ValueError("paymentRequirements.amountAtomic must be positive")
+
+
+def _resolve_paid_tool(payload: dict[str, Any]) -> dict[str, Any]:
+    raw_tool = str(
+        payload.get("tool")
+        or payload.get("toolId")
+        or payload.get("name")
+        or payload.get("mcpTool")
+        or ""
+    ).strip()
+    if not raw_tool:
+        raise ValueError("tool is required")
+
+    lookup = raw_tool.lower()
+    tool_id = PAID_TOOL_ALIASES.get(lookup, lookup)
+    tool = PAID_TOOLS.get(tool_id)
+    if tool is None:
+        available = ", ".join(sorted(PAID_TOOLS))
+        raise ValueError(f"Unknown paid tool '{raw_tool}'. Available tools: {available}")
+    return dict(tool)
+
+
+def _tool_result(tool: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    result = dict(payload)
+    result["tool"] = {
+        "id": tool["id"],
+        "name": tool["name"],
+        "kind": tool["kind"],
+        "source": tool["source"],
+        "description": tool["description"],
+        "resourceUrl": tool["resourceUrl"],
+        "mcpStyleName": tool["mcpStyleName"],
+        "inputSchema": tool["inputSchema"],
+    }
+    result["toolId"] = tool["id"]
+    result["toolName"] = tool["name"]
+    result["command"] = tool["command"]
+    result["mode"] = "paid_tool_" + str(payload.get("mode", "x402"))
+    return result
 
 
 def _busy_payload() -> dict[str, Any]:

@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from sign402_gateway.server import AgentStateStore, Sign402GatewayHandler
+from sign402_gateway.server import AgentStateStore, ExternalX402Buyer, Sign402GatewayHandler
 
 
 class DummyServer:
@@ -300,6 +300,149 @@ class GatewayServerTests(unittest.TestCase):
         DummyServer.x402_buyer.assert_called_once_with(
             "https://x402.goplausible.xyz/examples/weather"
         )
+
+    def test_external_x402_buyer_uses_cdp_for_base_mainnet_after_firefly_approval(self):
+        policy_hash = "a" * 64
+        payment_hash = "b" * 64
+        policy = {
+            "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bDa02913",
+            "allowedPurpose": "x402_api_access",
+            "maxPerPaymentAtomic": "10000",
+            "maxBudgetAtomic": "30000",
+        }
+        policy_state = {
+            "policy": policy,
+            "policyHash": policy_hash,
+            "firefly": {"approvedHash": policy_hash},
+        }
+        raw_payment_required = {
+            "x402Version": 2,
+            "accepts": [
+                {
+                    "scheme": "exact",
+                    "network": "eip155:8453",
+                    "amount": "10000",
+                    "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bDa02913",
+                    "payTo": "0x1111111111111111111111111111111111111111",
+                    "extra": {"name": "USDC", "decimals": 6, "paymentIntent": "base-intent-1"},
+                }
+            ],
+        }
+
+        firefly = Mock()
+        firefly.approve_payment_hash.return_value = {
+            "approved": True,
+            "approvedHash": payment_hash,
+            "deviceModel": 262,
+            "deviceSerial": 1056,
+        }
+        agent_state_store = Mock()
+        agent_state_store.read_policy.return_value = policy_state
+        agent_state_store.remaining_budget.return_value = 20000
+        event_store = Mock()
+        cdp_buyer = Mock(
+            return_value={
+                "status": 200,
+                "body": {"ok": True},
+                "paymentResponse": {"transaction": "0xTX"},
+            }
+        )
+        algorand_builder = Mock()
+
+        buyer = ExternalX402Buyer(
+            firefly=firefly,
+            payment_signature_builder=algorand_builder,
+            base_payment_client=cdp_buyer,
+            event_store=event_store,
+            agent_state_store=agent_state_store,
+        )
+
+        with (
+            patch(
+                "sign402_gateway.server.fetch_x402_payment_required",
+                return_value=raw_payment_required,
+            ),
+            patch(
+                "sign402_gateway.server.build_payment_commitment",
+                return_value={"paymentHash": payment_hash, "commitment": {"type": "sign402-payment"}},
+            ),
+        ):
+            result = buyer("https://api.example.com/paid-report")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["mode"], "official_x402_base_cdp")
+        self.assertEqual(result["txId"], "0xTX")
+        firefly.approve_payment_hash.assert_called_once()
+        cdp_buyer.assert_called_once_with("https://api.example.com/paid-report")
+        algorand_builder.assert_not_called()
+        agent_state_store.record_payment.assert_called_once_with(
+            policy_hash,
+            "base-intent-1",
+            10000,
+        )
+
+    def test_agent_tools_lists_paid_tool_catalog(self):
+        with patch("sys.stderr", io.StringIO()):
+            handler = self.make_handler("/agent/tools", method="GET")
+
+        response = self.response_text(handler)
+
+        self.assertIn("HTTP/1.0 200 OK", response)
+        self.assertIn('"mode": "paid_tool_catalog"', response)
+        self.assertIn('"id": "goplausible.weather"', response)
+        self.assertIn('"mcpStyleName": "get_weather"', response)
+
+    def test_agent_inspect_tool_resolves_alias_and_returns_offer(self):
+        policy_hash = "c" * 64
+        DummyServer.x402_inspector.reset_mock()
+        DummyServer.x402_inspector.return_value = {
+            "ok": True,
+            "mode": "inspect_only",
+            "resourceUrl": "https://x402.goplausible.xyz/examples/weather",
+            "paymentRequirements": {"amountAtomic": "10000", "asset": "10458941"},
+        }
+
+        with patch("sys.stderr", io.StringIO()):
+            handler = self.make_handler(
+                "/agent/inspect-tool",
+                {"tool": "weather", "policyHash": policy_hash},
+            )
+
+        response = self.response_text(handler)
+
+        self.assertIn("HTTP/1.0 200 OK", response)
+        self.assertIn('"toolId": "goplausible.weather"', response)
+        self.assertIn('"command": "buy goplausible weather"', response)
+        DummyServer.x402_inspector.assert_called_once_with(
+            "https://x402.goplausible.xyz/examples/weather",
+            policy_hash,
+        )
+
+    def test_agent_buy_tool_uses_x402_buyer_and_writes_tool_event(self):
+        DummyServer.x402_buyer.reset_mock()
+        DummyServer.event_store.reset_mock()
+        DummyServer.x402_buyer.return_value = {
+            "decision": "approved_and_executed",
+            "ok": True,
+            "resourceUrl": "https://x402.goplausible.xyz/examples/weather",
+            "txId": "TXID",
+        }
+
+        with patch("sys.stderr", io.StringIO()):
+            handler = self.make_handler("/agent/buy-tool", {"tool": "get_weather"})
+
+        response = self.response_text(handler)
+
+        self.assertIn("HTTP/1.0 200 OK", response)
+        self.assertIn('"decision": "approved_and_executed"', response)
+        self.assertIn('"toolName": "GoPlausible Weather"', response)
+        DummyServer.x402_buyer.assert_called_once_with(
+            "https://x402.goplausible.xyz/examples/weather"
+        )
+        DummyServer.event_store.write.assert_called_once()
+        saved_event = DummyServer.event_store.write.call_args.args[0]
+        self.assertEqual(saved_event["toolId"], "goplausible.weather")
+        self.assertEqual(saved_event["command"], "buy goplausible weather")
 
     def test_external_x402_buyer_sends_human_payment_context_to_firefly(self):
         from sign402_gateway.server import ExternalX402Buyer

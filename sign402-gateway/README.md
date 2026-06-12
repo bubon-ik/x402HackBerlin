@@ -32,7 +32,17 @@ POST /execute-payment
 GET  /events/latest
 POST /events/latest
 POST /agent/buy-probe
+GET  /agent/tools
+POST /agent/inspect-tool
+POST /agent/buy-tool
+POST /agent/inspect-x402
+POST /agent/buy-x402
 ```
+
+`/agent/inspect-x402` and `/agent/buy-x402` now support two official x402 lanes:
+
+- Algorand TestNet through the existing `x402-avm` payment signature builder.
+- Base Mainnet through `../cdp-x402-service`, CDP API key wallets, and CDP facilitator.
 
 ## Main Demo Flow
 
@@ -59,10 +69,68 @@ Hermes uses two product endpoints:
 
 ```text
 POST /approve-policy
-POST /agent/buy-probe
+POST /agent/buy-tool
 ```
 
-The resource server remains local. The gateway calls it directly.
+For the official GoPlausible weather demo, Hermes can inspect and buy the paid tool:
+
+```bash
+curl -sS http://127.0.0.1:8099/agent/tools
+
+curl -sS -X POST http://127.0.0.1:8099/agent/inspect-tool \
+  -H "Content-Type: application/json" \
+  -d '{"tool":"goplausible.weather"}'
+
+curl -sS -X POST http://127.0.0.1:8099/agent/buy-tool \
+  -H "Content-Type: application/json" \
+  -d '{"tool":"goplausible.weather"}'
+```
+
+The paid-tool endpoints wrap the official `/agent/buy-x402` path so the agent workflow is tool-oriented rather than URL-oriented. `/agent/buy-probe` remains available for the local probe demo.
+
+## Base Mainnet CDP Flow
+
+Set up the CDP helper once:
+
+```bash
+cd "/Users/mp/Documents/Berlin Hack/cdp-x402-service"
+npm install
+cp .env.example .env
+npm run account
+```
+
+Fill `.env` with local CDP secrets before running `npm run account`. Fund the printed EVM address with Base Mainnet USDC before live purchases.
+
+Approve a Base policy through `/approve-policy`:
+
+```json
+{
+  "policy": {
+    "version": "1",
+    "agentId": "hermes-demo",
+    "policyId": "policy-base-usdc-001",
+    "allowedPurpose": "x402_api_access",
+    "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bDa02913",
+    "maxBudgetAtomic": "100000",
+    "maxPerPaymentAtomic": "10000",
+    "nonce": "base-mainnet-usdc-001"
+  }
+}
+```
+
+Then inspect and buy a Base x402 resource:
+
+```bash
+curl -sS -X POST http://127.0.0.1:8099/agent/inspect-x402 \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://example.com/paid-x402-resource"}'
+
+curl -sS -X POST http://127.0.0.1:8099/agent/buy-x402 \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://example.com/paid-x402-resource"}'
+```
+
+The gateway still checks the stored policy and requires Firefly approval before invoking the CDP buyer.
 
 ## Manual Run
 

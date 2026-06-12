@@ -1,8 +1,10 @@
 # Hermes Sign402
 
-Hardware-approved x402 payments for an AI agent on Algorand.
+Hardware-approved x402 payments for an AI agent on Algorand and Base.
 
 Hermes can buy an official GoPlausible x402-protected API from Telegram, but every live payment must pass through a Firefly hardware approval step. The agent never receives the Algorand private key. The local Sign402 Gateway owns payment execution, checks the Firefly-approved policy, asks Firefly to approve the exact payment hash with a human-readable payment screen, sends the Algorand TestNet USDC transaction through `x402-avm`, and updates the demo dashboard.
+
+The Base Mainnet lane uses CDP API key wallets and the CDP x402 facilitator through `cdp-x402-service`. The same Sign402 rule applies: the gateway checks policy and Firefly must approve the exact payment hash before CDP signs or submits an x402 payment.
 
 ## Main Demo Flow
 
@@ -93,19 +95,28 @@ Then buy the official GoPlausible protected resource:
 buy goplausible weather
 ```
 
-Hermes should call:
+Hermes can now use the paid-tool flow instead of hardcoding the URL:
 
 ```text
-POST <gateway-url>/agent/buy-x402
+POST <gateway-url>/agent/inspect-tool
 Content-Type: application/json
 
-{"url":"https://x402.goplausible.xyz/examples/weather"}
+{"tool":"goplausible.weather"}
+```
+
+This returns the tool metadata, x402 payment requirements, receiver, amount, asset, and the Firefly payment approval hash that would be required. If the offer is acceptable, Hermes calls:
+
+```text
+POST <gateway-url>/agent/buy-tool
+Content-Type: application/json
+
+{"tool":"goplausible.weather"}
 ```
 
 The gateway performs the full flow:
 
 ```text
-request GoPlausible weather API -> receive 402 -> check USDC policy -> Firefly payment approval -> x402-avm PAYMENT-SIGNATURE -> GoPlausible facilitator settlement -> protected weather JSON -> dashboard event
+resolve paid tool -> request GoPlausible weather API -> receive 402 -> check USDC policy -> Firefly payment approval -> x402-avm PAYMENT-SIGNATURE -> GoPlausible facilitator settlement -> protected weather JSON -> dashboard event
 ```
 
 On payment approval, Firefly receives a `PAYMENT-CONTEXT` pre-command before the hash. For the GoPlausible weather demo the device shows:
@@ -137,12 +148,23 @@ Content-Type: application/json
 
 This endpoint fetches an external `402 Payment Required` response, accepts the official Algorand x402 fields (`amount`, `payTo`, CAIP-2 `network`, numeric ASA `asset`), normalizes them into the Sign402 payment commitment shape, and returns the Firefly `paymentApprovalHash` that would be approved before payment.
 
+For agent-facing paid tools, use:
+
+```text
+GET  <gateway-url>/agent/tools
+POST <gateway-url>/agent/inspect-tool
+POST <gateway-url>/agent/buy-tool
+```
+
+The first built-in paid tool is `goplausible.weather`, an MCP-style wrapper around the external GoPlausible x402 weather resource. This makes the demo read as "agent uses a paid tool" while still settling against the official x402 resource.
+
 Current status:
 
 - implemented: official GoPlausible/x402-v2 payment requirement parsing;
 - implemented: Sign402 payment hash construction from normalized official requirements;
 - implemented: official `x402-avm` `PAYMENT-SIGNATURE` payment group creation for Algorand TestNet USDC;
 - implemented: gateway endpoint `POST /agent/buy-x402` for Firefly-approved official GoPlausible purchases;
+- implemented: paid-tool catalog, `POST /agent/inspect-tool`, and `POST /agent/buy-tool` for MCP-style agent flow;
 - tested through Hermes Telegram: GoPlausible weather API returned `200 OK` with transaction `BTVGJ3MN42KKFBUN6BV3QRDZZDO54H2OCDX5LKHRU3PFASFYW72A`.
 
 For official GoPlausible payments, approve a policy whose `asset` is `10458941` and whose budget fields are in USDC atomic units. Then Hermes calls:
@@ -193,6 +215,7 @@ result: reachable
 
 - `sign402-gateway`: main orchestration API for Hermes.
 - `sign402-gateway/sign402_gateway/goplausible.py`: GoPlausible/x402-v2 requirement adapter.
+- `cdp-x402-service`: CDP Wallet helper for Base Mainnet x402 buyer and seller flows.
 - `demo-resource-server`: x402-style protected resource and verifier.
 - `payment-executor`: local Algorand TestNet payment sender.
 - `demo-dashboard`: live trace for the pitch.

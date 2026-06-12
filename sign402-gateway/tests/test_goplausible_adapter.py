@@ -5,6 +5,7 @@ from unittest.mock import Mock
 
 from sign402_gateway.goplausible import (
     ALGORAND_TESTNET_CAIP2,
+    BASE_MAINNET_CAIP2,
     fetch_x402_payment_required,
     normalize_x402_payment_required,
 )
@@ -114,6 +115,46 @@ class GoPlausibleAdapterTests(unittest.TestCase):
 
         with self.assertRaisesRegex(ValueError, "Unsupported x402 network"):
             normalize_x402_payment_required(payload, resource_url="https://example.test")
+
+    def test_normalizes_base_mainnet_payment_requirements(self):
+        payload = {
+            "x402Version": 2,
+            "accepts": [
+                {
+                    "scheme": "exact",
+                    "network": BASE_MAINNET_CAIP2,
+                    "amount": "10000",
+                    "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bDa02913",
+                    "payTo": "0x1111111111111111111111111111111111111111",
+                    "maxTimeoutSeconds": 60,
+                    "extra": {
+                        "name": "USDC",
+                        "decimals": 6,
+                    },
+                }
+            ],
+        }
+
+        normalized = normalize_x402_payment_required(
+            payload,
+            resource_url="https://api.example.com/paid-report",
+        )
+
+        self.assertEqual(normalized["sourceFormat"], "x402-evm-v2")
+        self.assertEqual(normalized["network"], "base-mainnet")
+        self.assertEqual(normalized["x402Network"], BASE_MAINNET_CAIP2)
+        self.assertEqual(normalized["amountAtomic"], "10000")
+        self.assertEqual(
+            normalized["asset"],
+            "0x833589fCD6eDb6E08f4c7C32D4f71b54bDa02913",
+        )
+        self.assertEqual(
+            normalized["receiver"],
+            "0x1111111111111111111111111111111111111111",
+        )
+        self.assertEqual(normalized["purpose"], "x402_api_access")
+        self.assertEqual(normalized["extra"]["name"], "USDC")
+        self.assertEqual(normalized["originalPaymentRequirements"], payload["accepts"][0])
 
     def test_fetch_sends_json_accept_and_user_agent_headers(self):
         class FakeResponse:

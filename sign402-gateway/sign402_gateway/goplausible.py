@@ -9,12 +9,16 @@ from typing import Any, Callable
 
 ALGORAND_MAINNET_CAIP2 = "algorand:wGHE2Pwdvd7S12BL5FaOP20EGYesN73ktiC1qzkkit8="
 ALGORAND_TESTNET_CAIP2 = "algorand:SGO1GKSzyE7IEPItTxCByw9x8FmnrCDexi9/cOUJOiI="
+BASE_MAINNET_CAIP2 = "eip155:8453"
+BASE_SEPOLIA_CAIP2 = "eip155:84532"
 
 NETWORK_ALIASES = {
     ALGORAND_MAINNET_CAIP2: "algorand-mainnet",
     ALGORAND_TESTNET_CAIP2: "algorand-testnet",
     "algorand-mainnet": "algorand-mainnet",
     "algorand-testnet": "algorand-testnet",
+    BASE_MAINNET_CAIP2: "base-mainnet",
+    "base-mainnet": "base-mainnet",
 }
 
 
@@ -141,9 +145,15 @@ def normalize_x402_payment_required(
         "purpose": str(requirement.get("purpose", purpose)),
         "maxTimeoutSeconds": requirement.get("maxTimeoutSeconds"),
         "extra": extra,
-        "sourceFormat": "x402-avm-v2",
+        "sourceFormat": _source_format_for_network(legacy_network),
         "originalPaymentRequirements": requirement,
     }
+
+
+def _source_format_for_network(network: str) -> str:
+    if network.startswith("base-"):
+        return "x402-evm-v2"
+    return "x402-avm-v2"
 
 
 def _extract_payment_requirement(payload: dict[str, Any]) -> dict[str, Any]:
