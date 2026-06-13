@@ -5,7 +5,13 @@ import unittest
 from pathlib import Path
 from unittest.mock import ANY, Mock, patch
 
-from sign402_gateway.server import AgentStateStore, ExternalX402Buyer, Sign402GatewayHandler
+from sign402_gateway.server import (
+    AgentStateStore,
+    ExternalX402Buyer,
+    Sign402GatewayHandler,
+    _resolve_paid_tool,
+    _tool_result,
+)
 
 
 class DummyServer:
@@ -34,7 +40,13 @@ class FakeSocket:
 
 
 class GatewayServerTests(unittest.TestCase):
-    def make_handler(self, path: str, body: dict | None = None, method: str = "POST"):
+    def make_handler(
+        self,
+        path: str,
+        body: dict | None = None,
+        method: str = "POST",
+        server=None,
+    ):
         encoded = b""
         if body is not None:
             encoded = json.dumps(body).encode("utf-8")
@@ -47,7 +59,7 @@ class GatewayServerTests(unittest.TestCase):
             + encoded
         )
         socket = FakeSocket(request)
-        handler = Sign402GatewayHandler(socket, ("127.0.0.1", 12345), DummyServer())
+        handler = Sign402GatewayHandler(socket, ("127.0.0.1", 12345), server or DummyServer())
         handler.response = socket.wfile
         return handler
 
@@ -447,6 +459,13 @@ class GatewayServerTests(unittest.TestCase):
         self.assertIn('"mcpStyleName": "get_weather"', response)
         self.assertIn('"id": "base.sign402.report"', response)
         self.assertIn('"mcpStyleName": "get_sign402_report"', response)
+        self.assertIn('"id": "x402.twitter.profile"', response)
+        self.assertIn('"mcpStyleName": "get_x_profile"', response)
+        self.assertIn('"id": "otto.crypto_news"', response)
+        self.assertIn('"id": "otto.hyperliquid_market"', response)
+        self.assertIn('"id": "otto.funding_rates"', response)
+        self.assertIn('"id": "onesource.ens"', response)
+        self.assertIn('"id": "anchor.token_price"', response)
 
     def test_agent_inspect_base_tool_resolves_alias_and_returns_offer(self):
         policy_hash = "c" * 64
@@ -522,6 +541,296 @@ class GatewayServerTests(unittest.TestCase):
         self.assertEqual(saved_event["toolId"], "base.sign402.report")
         self.assertEqual(saved_event["command"], "buy base sign402 report")
         self.assertEqual(saved_event["telegramText"], body["telegramText"])
+
+    def test_agent_inspect_twitter_profile_tool_builds_username_url(self):
+        policy_hash = "c" * 64
+        DummyServer.x402_inspector.reset_mock()
+        DummyServer.x402_inspector.return_value = {
+            "ok": True,
+            "mode": "inspect_only",
+            "resourceUrl": "https://x402.twit.sh/users/by/username?username=elonmusk",
+            "paymentRequirements": {
+                "network": "base-mainnet",
+                "amountAtomic": "5000",
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            },
+        }
+
+        with patch("sys.stderr", io.StringIO()):
+            handler = self.make_handler(
+                "/agent/inspect-tool",
+                {
+                    "tool": "x-profile",
+                    "username": "elonmusk",
+                    "policyHash": policy_hash,
+                },
+            )
+
+        response = self.response_text(handler)
+
+        self.assertIn("HTTP/1.0 200 OK", response)
+        self.assertIn('"toolId": "x402.twitter.profile"', response)
+        self.assertIn('"command": "buy x profile <username>"', response)
+        DummyServer.x402_inspector.assert_called_once_with(
+            "https://x402.twit.sh/users/by/username?username=elonmusk",
+            policy_hash,
+        )
+
+    def test_agent_buy_twitter_profile_tool_requires_username(self):
+        DummyServer.x402_buyer.reset_mock()
+
+        with patch("sys.stderr", io.StringIO()):
+            handler = self.make_handler("/agent/buy-tool", {"tool": "x-profile"})
+
+        response = self.response_text(handler)
+
+        self.assertIn("HTTP/1.0 400 Bad Request", response)
+        self.assertIn("username is required", response)
+        DummyServer.x402_buyer.assert_not_called()
+
+    def test_agent_buy_twitter_profile_tool_uses_base_x402_url(self):
+        DummyServer.x402_buyer.reset_mock()
+        DummyServer.event_store.reset_mock()
+        DummyServer.x402_buyer.return_value = {
+            "decision": "approved_and_executed",
+            "ok": True,
+            "mode": "official_x402_base_cdp",
+            "resourceUrl": "https://x402.twit.sh/users/by/username?username=elonmusk",
+            "txId": "0xTX",
+            "amountAtomic": "5000",
+            "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            "network": "base-mainnet",
+            "remainingBudgetAtomic": "25000",
+            "paymentRequirements": {
+                "extra": {
+                    "name": "USD Coin",
+                    "version": "2",
+                },
+            },
+        }
+
+        with patch("sys.stderr", io.StringIO()):
+            handler = self.make_handler(
+                "/agent/buy-tool",
+                {"tool": "x-profile", "username": "elonmusk"},
+            )
+
+        response = self.response_text(handler)
+        body = json.loads(response.split("\r\n\r\n", 1)[1])
+
+        self.assertIn("HTTP/1.0 200 OK", response)
+        self.assertEqual(
+            body["telegramText"],
+            "✅ X/Twitter Profile unlocked. Paid 0.005 USDC. Tx https://basescan.org/tx/0xTX. Budget left 0.025 USDC.",
+        )
+        DummyServer.x402_buyer.assert_called_once_with(
+            "https://x402.twit.sh/users/by/username?username=elonmusk",
+            payment_context={"title": "X PROFILE", "subject": "@elonmusk"},
+        )
+        saved_event = DummyServer.event_store.write.call_args.args[0]
+        self.assertEqual(saved_event["toolId"], "x402.twitter.profile")
+        self.assertEqual(saved_event["resourceUrl"], "https://x402.twit.sh/users/by/username?username=elonmusk")
+
+    def test_agent_buy_tool_suppresses_duplicate_purchase_retry(self):
+        DummyServer.x402_buyer.reset_mock()
+        DummyServer.event_store.reset_mock()
+        DummyServer.x402_buyer.return_value = {
+            "decision": "approved_and_executed",
+            "ok": True,
+            "mode": "official_x402_base_cdp",
+            "resourceUrl": "https://x402.twit.sh/users/by/username?username=elonmusk",
+            "txId": "0xTX",
+            "amountAtomic": "5000",
+            "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            "network": "base-mainnet",
+            "remainingBudgetAtomic": "25000",
+            "paymentRequirements": {
+                "extra": {
+                    "name": "USD Coin",
+                    "version": "2",
+                },
+            },
+        }
+        server = DummyServer()
+
+        with patch("sys.stderr", io.StringIO()):
+            first = self.make_handler(
+                "/agent/buy-tool",
+                {"tool": "x-profile", "username": "elonmusk"},
+                server=server,
+            )
+            second = self.make_handler(
+                "/agent/buy-tool",
+                {"tool": "x-profile", "username": "elonmusk"},
+                server=server,
+            )
+
+        first_body = json.loads(self.response_text(first).split("\r\n\r\n", 1)[1])
+        second_body = json.loads(self.response_text(second).split("\r\n\r\n", 1)[1])
+
+        self.assertTrue(first_body["ok"])
+        self.assertTrue(second_body["ok"])
+        self.assertTrue(second_body["duplicateSuppressed"])
+        self.assertEqual(second_body["txId"], "0xTX")
+        DummyServer.x402_buyer.assert_called_once_with(
+            "https://x402.twit.sh/users/by/username?username=elonmusk",
+            payment_context={"title": "X PROFILE", "subject": "@elonmusk"},
+        )
+        DummyServer.event_store.write.assert_called_once()
+
+    def test_agent_inspect_recommended_x402_tools_builds_parameterized_urls(self):
+        policy_hash = "c" * 64
+        cases = [
+            (
+                {"tool": "crypto-news", "policyHash": policy_hash},
+                "otto.crypto_news",
+                "https://x402.ottoai.services/crypto-news",
+            ),
+            (
+                {"tool": "hyperliquid", "asset": "BTC", "policyHash": policy_hash},
+                "otto.hyperliquid_market",
+                "https://x402.ottoai.services/hyperliquid-market?asset=BTC",
+            ),
+            (
+                {"tool": "funding", "symbol": "BTC", "policyHash": policy_hash},
+                "otto.funding_rates",
+                "https://x402.ottoai.services/funding-rates?symbol=BTC",
+            ),
+            (
+                {"tool": "ens", "input": "vitalik.eth", "policyHash": policy_hash},
+                "onesource.ens",
+                "https://skills.onesource.io/api/chain/ens/vitalik.eth?network=ethereum",
+            ),
+            (
+                {"tool": "token-price", "symbol": "ETH", "policyHash": policy_hash},
+                "anchor.token_price",
+                "https://api.anchor-x402.com/v1/price/token?symbol=ETH",
+            ),
+        ]
+        for payload, tool_id, expected_url in cases:
+            with self.subTest(tool=tool_id):
+                DummyServer.x402_inspector.reset_mock()
+                DummyServer.x402_inspector.return_value = {
+                    "ok": True,
+                    "mode": "inspect_only",
+                    "resourceUrl": expected_url,
+                    "paymentRequirements": {
+                        "network": "base-mainnet",
+                        "amountAtomic": "1000",
+                        "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                    },
+                }
+
+                with patch("sys.stderr", io.StringIO()):
+                    handler = self.make_handler("/agent/inspect-tool", payload)
+
+                response = self.response_text(handler)
+
+                self.assertIn("HTTP/1.0 200 OK", response)
+                self.assertIn(f'"toolId": "{tool_id}"', response)
+                DummyServer.x402_inspector.assert_called_once_with(expected_url, policy_hash)
+
+    def test_agent_buy_hyperliquid_tool_passes_firefly_context(self):
+        DummyServer.x402_buyer.reset_mock()
+        DummyServer.event_store.reset_mock()
+        DummyServer.x402_buyer.return_value = {
+            "decision": "approved_and_executed",
+            "ok": True,
+            "mode": "official_x402_base_cdp",
+            "resourceUrl": "https://x402.ottoai.services/hyperliquid-market?asset=BTC",
+            "txId": "0xTX",
+            "amountAtomic": "1000",
+            "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            "network": "base-mainnet",
+            "remainingBudgetAtomic": "99000",
+            "resourceResult": {
+                "body": {
+                    "status": "success",
+                    "market": {
+                        "symbol": "BTC",
+                        "currentPrice": "64138.50",
+                        "markPrice": "64138.50",
+                        "maxLeverage": 40,
+                        "tradingUrl": "https://app.hyperliquid.xyz/trade/BTC",
+                    },
+                },
+            },
+            "paymentRequirements": {
+                "extra": {
+                    "name": "USD Coin",
+                    "version": "2",
+                },
+            },
+        }
+
+        with patch("sys.stderr", io.StringIO()):
+            handler = self.make_handler(
+                "/agent/buy-tool",
+                {"tool": "hyperliquid", "asset": "BTC"},
+            )
+
+        response = self.response_text(handler)
+        body = json.loads(response.split("\r\n\r\n", 1)[1])
+
+        self.assertIn("HTTP/1.0 200 OK", response)
+        self.assertEqual(
+            body["telegramText"],
+            "✅ Hyperliquid BTC unlocked. Price $64138.50. Max leverage 40x. Paid 0.001 USDC. Tx https://basescan.org/tx/0xTX. Budget left 0.099 USDC.\nhttps://app.hyperliquid.xyz/trade/BTC",
+        )
+        DummyServer.x402_buyer.assert_called_once_with(
+            "https://x402.ottoai.services/hyperliquid-market?asset=BTC",
+            payment_context={"title": "HYPERLIQUID", "subject": "BTC"},
+        )
+
+    def test_paid_tool_telegram_text_includes_resource_value_for_recommended_tools(self):
+        cases = [
+            (
+                "otto.crypto_news",
+                {"resourceResult": {"body": {"data": {"report": "Latest crypto news..."}}}},
+                "Latest crypto news...",
+            ),
+            (
+                "otto.funding_rates",
+                {"resourceResult": {"body": {"report": "Symbol: BTC\nFunding is positive"}}},
+                "Symbol: BTC",
+            ),
+            (
+                "onesource.ens",
+                {"resourceResult": {"body": {"input": "vitalik.eth", "address": "0xd8da6bf26964af9d7eed9e03e53415d37aa96045"}}},
+                "vitalik.eth → 0xd8da6bf26964af9d7eed9e03e53415d37aa96045",
+            ),
+            (
+                "anchor.token_price",
+                {"resourceResult": {"body": {"symbol": "ETH", "usd": 3120.55, "usd_24h_change_pct": 1.23}}},
+                "ETH price: $3120.55",
+            ),
+        ]
+        base_payload = {
+            "decision": "approved_and_executed",
+            "ok": True,
+            "txId": "0xTX",
+            "amountAtomic": "1000",
+            "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            "network": "base-mainnet",
+            "remainingBudgetAtomic": "99000",
+            "paymentRequirements": {
+                "extra": {
+                    "name": "USD Coin",
+                    "version": "2",
+                },
+            },
+        }
+
+        for tool_id, extra_payload, expected_text in cases:
+            with self.subTest(tool=tool_id):
+                result = _tool_result(
+                    _resolve_paid_tool({"tool": tool_id}),
+                    {**base_payload, **extra_payload},
+                )
+
+                self.assertIn(expected_text, result["telegramText"])
+                self.assertIn("Paid 0.001 USDC", result["telegramText"])
+                self.assertIn("https://basescan.org/tx/0xTX", result["telegramText"])
 
     def test_agent_inspect_tool_resolves_alias_and_returns_offer(self):
         policy_hash = "c" * 64
@@ -643,6 +952,72 @@ class GatewayServerTests(unittest.TestCase):
         self.assertEqual(
             firefly.approve_payment_hash.call_args.kwargs["context_lines"],
             ["x402 WEATHER", "0.01 USDC", "GoPlausible API"],
+        )
+
+    def test_external_x402_buyer_can_override_firefly_context_for_named_tool(self):
+        policy_hash = "a" * 64
+        payment_hash = "b" * 64
+        policy = {
+            "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bDa02913",
+            "allowedPurpose": "x402_api_access",
+            "maxPerPaymentAtomic": "10000",
+            "maxBudgetAtomic": "30000",
+        }
+        requirement = {
+            "network": "base-mainnet",
+            "x402Network": "eip155:8453",
+            "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            "amountAtomic": "5000",
+            "receiver": "0x1111111111111111111111111111111111111111",
+            "resource": "https://x402.twit.sh/users/by/username?username=jessepollak",
+            "paymentIntent": "intent-001",
+            "purpose": "x402_api_access",
+            "extra": {"name": "USD Coin", "version": "2"},
+        }
+        firefly = Mock()
+        firefly.approve_payment_hash.return_value = {
+            "approved": True,
+            "approvedHash": payment_hash,
+        }
+        event_store = Mock()
+        agent_state_store = Mock()
+        agent_state_store.read_policy.return_value = {
+            "policy": policy,
+            "policyHash": policy_hash,
+            "firefly": {"approvedHash": policy_hash},
+        }
+        agent_state_store.remaining_budget.return_value = 25000
+        cdp_buyer = Mock(
+            return_value={
+                "status": 200,
+                "paymentResponse": {"transaction": "0xTX"},
+            }
+        )
+
+        buyer = ExternalX402Buyer(
+            firefly=firefly,
+            payment_signature_builder=Mock(),
+            base_payment_client=cdp_buyer,
+            event_store=event_store,
+            agent_state_store=agent_state_store,
+        )
+
+        with (
+            patch("sign402_gateway.server.fetch_x402_payment_required", return_value={"accepts": []}),
+            patch("sign402_gateway.server.normalize_x402_payment_required", return_value=requirement),
+            patch(
+                "sign402_gateway.server.build_payment_commitment",
+                return_value={"paymentHash": payment_hash, "commitment": {"type": "sign402-payment"}},
+            ),
+        ):
+            buyer(
+                "https://x402.twit.sh/users/by/username?username=jessepollak",
+                payment_context={"title": "X PROFILE", "subject": "@jessepollak"},
+            )
+
+        self.assertEqual(
+            firefly.approve_payment_hash.call_args.kwargs["context_lines"],
+            ["X PROFILE", "@jessepollak", "0.005 USDC"],
         )
 
 

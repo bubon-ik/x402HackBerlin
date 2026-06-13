@@ -44,9 +44,18 @@ For buying GoPlausible weather, call POST /agent/buy-tool with {"tool":"goplausi
 Before buying the Base Sign402 report, call POST /agent/inspect-tool with {"tool":"base.sign402.report"}.
 For buying the Base Sign402 report, call POST /agent/buy-tool with {"tool":"base.sign402.report"}.
 When I say "buy base sign402 report", "buy base report", or "buy sign402 report", use the Base Sign402 report tool.
+Before buying an X/Twitter profile lookup, call POST /agent/inspect-tool with {"tool":"x402.twitter.profile","username":"<username>"}.
+For buying an X/Twitter profile lookup, call POST /agent/buy-tool with {"tool":"x402.twitter.profile","username":"<username>"}.
+When I say "buy x profile <username>", "buy twitter profile <username>", or "buy x402 twitter <username>", use the X/Twitter Profile tool and strip a leading @ from the username.
+When I say "buy crypto news", use {"tool":"otto.crypto_news"}.
+When I say "buy hyperliquid <asset>", use {"tool":"otto.hyperliquid_market","asset":"<asset>"}.
+When I say "buy funding <symbol>", use {"tool":"otto.funding_rates","symbol":"<symbol>"}.
+When I say "buy ens <name>", use {"tool":"onesource.ens","input":"<name>"}.
+When I say "buy token price <symbol>", use {"tool":"anchor.token_price","symbol":"<symbol>"}.
 When I say "buy x402 <url>", first call POST /agent/inspect-x402 with {"url":"<url>"}.
 If the quote is acceptable and it is Base Mainnet USDC, call POST /agent/buy-x402 with {"url":"<url>"}.
 After buying a raw x402 URL, reply using only telegramText if present.
+For one Telegram user command, call the matching buy endpoint only once. If a response contains duplicateSuppressed=true, reply with its telegramText and do not retry.
 Do not build the x402 payment yourself. Do not ask for private keys. Only call the Sign402 Gateway.
 ```
 

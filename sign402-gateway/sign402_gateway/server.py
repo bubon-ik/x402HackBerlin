@@ -9,6 +9,7 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import quote
 
 
 ROOT_DIR = Path(__file__).resolve().parents[2]
@@ -37,6 +38,7 @@ from x402_demo.core import encode_payment_proof
 from .goplausible import fetch_x402_paid_resource, fetch_x402_payment_required, normalize_x402_payment_required
 
 HEX_32_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+BUY_TOOL_DUPLICATE_SUPPRESSION_SECONDS = 120
 
 
 PAID_TOOLS: dict[str, dict[str, Any]] = {
@@ -70,6 +72,192 @@ PAID_TOOLS: dict[str, dict[str, Any]] = {
             "required": [],
         },
     },
+    "x402.twitter.profile": {
+        "id": "x402.twitter.profile",
+        "name": "X/Twitter Profile",
+        "kind": "external_x402_resource",
+        "source": "x402.twit.sh",
+        "description": "Look up a Twitter/X profile by username through a Base USDC x402 endpoint.",
+        "resourceUrl": "https://x402.twit.sh/users/by/username",
+        "resourceUrlTemplate": "https://x402.twit.sh/users/by/username?username={username}",
+        "templateFields": {
+            "username": {
+                "aliases": ["handle", "screenName"],
+                "stripPrefix": "@",
+                "required": True,
+            },
+        },
+        "paymentContext": {
+            "title": "X PROFILE",
+            "subjectField": "username",
+            "subjectPrefix": "@",
+        },
+        "command": "buy x profile <username>",
+        "mcpStyleName": "get_x_profile",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "username": {
+                    "type": "string",
+                    "description": "Twitter/X screen name without @.",
+                },
+            },
+            "required": ["username"],
+        },
+    },
+    "otto.crypto_news": {
+        "id": "otto.crypto_news",
+        "name": "Crypto News",
+        "kind": "external_x402_resource",
+        "source": "Otto AI",
+        "description": "Real-time crypto market news with sentiment analysis and top headlines.",
+        "resourceUrl": "https://x402.ottoai.services/crypto-news",
+        "paymentContext": {
+            "title": "CRYPTO NEWS",
+            "subject": "Otto AI",
+        },
+        "command": "buy crypto news",
+        "mcpStyleName": "get_crypto_news",
+        "inputSchema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+    "otto.hyperliquid_market": {
+        "id": "otto.hyperliquid_market",
+        "name": "Hyperliquid Market",
+        "kind": "external_x402_resource",
+        "source": "Otto AI",
+        "description": "Hyperliquid perpetuals market data: price, funding, open interest, leverage, and size specs.",
+        "resourceUrl": "https://x402.ottoai.services/hyperliquid-market",
+        "resourceUrlTemplate": "https://x402.ottoai.services/hyperliquid-market?asset={asset}",
+        "templateFields": {
+            "asset": {
+                "aliases": ["symbol", "ticker"],
+                "required": True,
+                "transform": "upper",
+            },
+        },
+        "paymentContext": {
+            "title": "HYPERLIQUID",
+            "subjectField": "asset",
+        },
+        "command": "buy hyperliquid <asset>",
+        "mcpStyleName": "get_hyperliquid_market",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "asset": {
+                    "type": "string",
+                    "description": "Perpetual market ticker, e.g. BTC, ETH, SOL.",
+                },
+            },
+            "required": ["asset"],
+        },
+    },
+    "otto.funding_rates": {
+        "id": "otto.funding_rates",
+        "name": "Funding Rates",
+        "kind": "external_x402_resource",
+        "source": "Otto AI",
+        "description": "Cross-venue funding rates, open interest, long/short ratios, whale positions, and liquidations.",
+        "resourceUrl": "https://x402.ottoai.services/funding-rates",
+        "resourceUrlTemplate": "https://x402.ottoai.services/funding-rates?symbol={symbol}",
+        "templateFields": {
+            "symbol": {
+                "aliases": ["asset", "ticker"],
+                "required": True,
+                "transform": "upper",
+            },
+        },
+        "paymentContext": {
+            "title": "FUNDING",
+            "subjectField": "symbol",
+        },
+        "command": "buy funding <symbol>",
+        "mcpStyleName": "get_funding_rates",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "symbol": {
+                    "type": "string",
+                    "description": "Market ticker, e.g. BTC, ETH, SOL.",
+                },
+            },
+            "required": ["symbol"],
+        },
+    },
+    "onesource.ens": {
+        "id": "onesource.ens",
+        "name": "ENS Resolve",
+        "kind": "external_x402_resource",
+        "source": "OneSource",
+        "description": "Resolve a .eth name into an address, or an address into its primary .eth name.",
+        "resourceUrl": "https://skills.onesource.io/api/chain/ens/:input",
+        "resourceUrlTemplate": "https://skills.onesource.io/api/chain/ens/{input}?network={network}",
+        "templateFields": {
+            "input": {
+                "aliases": ["name", "ens", "address"],
+                "required": True,
+            },
+            "network": {
+                "default": "ethereum",
+            },
+        },
+        "paymentContext": {
+            "title": "ENS RESOLVE",
+            "subjectField": "input",
+        },
+        "command": "buy ens <name>",
+        "mcpStyleName": "resolve_ens",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "input": {
+                    "type": "string",
+                    "description": ".eth name or Ethereum address.",
+                },
+                "network": {
+                    "type": "string",
+                    "description": "Ethereum network, defaults to ethereum.",
+                },
+            },
+            "required": ["input"],
+        },
+    },
+    "anchor.token_price": {
+        "id": "anchor.token_price",
+        "name": "Token Price",
+        "kind": "external_x402_resource",
+        "source": "Anchor x402",
+        "description": "USD price for a major token by symbol.",
+        "resourceUrl": "https://api.anchor-x402.com/v1/price/token",
+        "resourceUrlTemplate": "https://api.anchor-x402.com/v1/price/token?symbol={symbol}",
+        "templateFields": {
+            "symbol": {
+                "aliases": ["asset", "ticker"],
+                "required": True,
+                "transform": "upper",
+            },
+        },
+        "paymentContext": {
+            "title": "TOKEN PRICE",
+            "subjectField": "symbol",
+        },
+        "command": "buy token price <symbol>",
+        "mcpStyleName": "get_token_price",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "symbol": {
+                    "type": "string",
+                    "description": "Token ticker, e.g. ETH, BTC, SOL.",
+                },
+            },
+            "required": ["symbol"],
+        },
+    },
 }
 
 PAID_TOOL_ALIASES = {
@@ -82,6 +270,32 @@ PAID_TOOL_ALIASES = {
     "sign402-report": "base.sign402.report",
     "sign402_report": "base.sign402.report",
     "get_sign402_report": "base.sign402.report",
+    "x-profile": "x402.twitter.profile",
+    "x_profile": "x402.twitter.profile",
+    "twitter-profile": "x402.twitter.profile",
+    "twitter_profile": "x402.twitter.profile",
+    "x402-twitter-profile": "x402.twitter.profile",
+    "get_x_profile": "x402.twitter.profile",
+    "crypto-news": "otto.crypto_news",
+    "crypto_news": "otto.crypto_news",
+    "news": "otto.crypto_news",
+    "get_crypto_news": "otto.crypto_news",
+    "hyperliquid": "otto.hyperliquid_market",
+    "hyperliquid-market": "otto.hyperliquid_market",
+    "hyperliquid_market": "otto.hyperliquid_market",
+    "get_hyperliquid_market": "otto.hyperliquid_market",
+    "funding": "otto.funding_rates",
+    "funding-rates": "otto.funding_rates",
+    "funding_rates": "otto.funding_rates",
+    "get_funding_rates": "otto.funding_rates",
+    "ens": "onesource.ens",
+    "ens-resolve": "onesource.ens",
+    "ens_resolve": "onesource.ens",
+    "resolve_ens": "onesource.ens",
+    "token-price": "anchor.token_price",
+    "token_price": "anchor.token_price",
+    "price": "anchor.token_price",
+    "get_token_price": "anchor.token_price",
 }
 
 
@@ -287,28 +501,45 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
         try:
             payload = self._read_json()
             tool = _resolve_paid_tool(payload)
+            resource_url = _paid_tool_resource_url(tool, payload)
             policy_hash = self._policy_hash_from_payload_or_state(payload)
-            inspection = self.server.x402_inspector(str(tool["resourceUrl"]), policy_hash)
-            result = _tool_result(tool, inspection)
+            inspection = self.server.x402_inspector(resource_url, policy_hash)
+            result = _tool_result(tool, inspection, resource_url)
             result["nextStep"] = "If acceptable, POST /agent/buy-tool with the same tool id. Firefly approval is required before payment."
             self._send_json(result)
         except Exception as exc:
             self._send_json({"ok": False, "error": str(exc)}, status=400)
 
     def _handle_agent_buy_tool(self) -> None:
+        try:
+            payload = self._read_json()
+            tool = _resolve_paid_tool(payload)
+            resource_url = _paid_tool_resource_url(tool, payload)
+            cache_key = _buy_tool_cache_key(tool, resource_url)
+            cached = self._read_buy_tool_cache(cache_key)
+            if cached is not None:
+                self._send_json(cached)
+                return
+        except Exception as exc:
+            self._send_json({"decision": "rejected", "ok": False, "error": str(exc)}, status=400)
+            return
+
         if not self._acquire_firefly():
             self._send_json(_busy_payload(), status=409)
             return
 
         try:
-            payload = self._read_json()
-            tool = _resolve_paid_tool(payload)
-            result = self.server.x402_buyer(str(tool["resourceUrl"]))
-            enriched = _tool_result(tool, result)
+            payment_context = _tool_payment_context(tool, payload)
+            if payment_context:
+                result = self.server.x402_buyer(resource_url, payment_context=payment_context)
+            else:
+                result = self.server.x402_buyer(resource_url)
+            enriched = _tool_result(tool, result, resource_url)
             enriched["decision"] = result.get("decision", "approved_and_executed")
             enriched["ok"] = bool(result.get("ok", False))
             if enriched.get("ok"):
                 self.server.event_store.write(enriched)
+            self._store_buy_tool_cache(cache_key, enriched)
             self._send_json(enriched)
         except Exception as exc:
             self._send_json({"decision": "rejected", "ok": False, "error": str(exc)}, status=400)
@@ -415,6 +646,38 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
 
         self.server.firefly_busy = False
 
+    def _read_buy_tool_cache(self, cache_key: str) -> dict[str, Any] | None:
+        cache = getattr(self.server, "buy_tool_response_cache", None)
+        if not isinstance(cache, dict):
+            return None
+
+        cached = cache.get(cache_key)
+        if not isinstance(cached, dict):
+            return None
+
+        if time.time() - float(cached.get("storedAt", 0)) > BUY_TOOL_DUPLICATE_SUPPRESSION_SECONDS:
+            cache.pop(cache_key, None)
+            return None
+
+        response = dict(cached.get("response") or {})
+        response["duplicateSuppressed"] = True
+        response["message"] = (
+            "Duplicate buy-tool request suppressed. "
+            "Returning the previous receipt without asking Firefly again."
+        )
+        return response
+
+    def _store_buy_tool_cache(self, cache_key: str, response: dict[str, Any]) -> None:
+        cache = getattr(self.server, "buy_tool_response_cache", None)
+        if not isinstance(cache, dict):
+            cache = {}
+            self.server.buy_tool_response_cache = cache
+
+        cache[cache_key] = {
+            "storedAt": time.time(),
+            "response": dict(response),
+        }
+
 
 class Sign402GatewayServer(ThreadingHTTPServer):
     def __init__(
@@ -439,6 +702,7 @@ class Sign402GatewayServer(ThreadingHTTPServer):
         self.x402_inspector = x402_inspector
         self.x402_buyer = x402_buyer
         self.firefly_lock = threading.Lock()
+        self.buy_tool_response_cache: dict[str, dict[str, Any]] = {}
 
 
 def build_server(
@@ -730,6 +994,7 @@ class ExternalX402Buyer:
         resource_url: str,
         *,
         requirement_validator: Callable[[dict[str, Any]], None] | None = None,
+        payment_context: dict[str, str] | None = None,
     ) -> dict[str, Any]:
         policy_state = self.agent_state_store.read_policy()
         if policy_state is None:
@@ -751,7 +1016,7 @@ class ExternalX402Buyer:
         payment_hash = payment_commitment["paymentHash"]
         approval = self.firefly.approve_payment_hash(
             payment_hash,
-            context_lines=_payment_context_lines(requirement),
+            context_lines=_payment_context_lines(requirement, payment_context=payment_context),
         )
         if not approval.get("approved"):
             event = {
@@ -993,9 +1258,23 @@ def _read_hash(payload: dict[str, Any], key: str) -> str:
     return value
 
 
-def _payment_context_lines(requirement: dict[str, Any] | None) -> list[str]:
+def _payment_context_lines(
+    requirement: dict[str, Any] | None,
+    *,
+    payment_context: dict[str, str] | None = None,
+) -> list[str]:
     if not requirement or "amountAtomic" not in requirement:
         return ["x402 PAYMENT", "sign402 approval"]
+
+    if payment_context:
+        title = str(payment_context.get("title") or "x402 PAYMENT").strip()
+        subject = str(payment_context.get("subject") or "").strip()
+        if subject:
+            return [
+                title[:20],
+                subject[:20],
+                _format_display_amount(requirement),
+            ]
 
     resource = str(requirement.get("resource", ""))
     network = str(requirement.get("network") or requirement.get("x402Network") or "")
@@ -1091,15 +1370,108 @@ def _resolve_paid_tool(payload: dict[str, Any]) -> dict[str, Any]:
     return dict(tool)
 
 
-def _tool_result(tool: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+def _paid_tool_resource_url(tool: dict[str, Any], payload: dict[str, Any]) -> str:
+    template = str(tool.get("resourceUrlTemplate") or "").strip()
+    if not template:
+        return str(tool["resourceUrl"])
+
+    fields = tool.get("templateFields")
+    if not isinstance(fields, dict):
+        raise ValueError(f"Tool '{tool.get('id')}' has an unsupported resourceUrlTemplate")
+
+    values = {
+        name: _paid_tool_template_value(name, spec, payload)
+        for name, spec in fields.items()
+    }
+    return template.format(**values)
+
+
+def _tool_payment_context(tool: dict[str, Any], payload: dict[str, Any]) -> dict[str, str] | None:
+    config = tool.get("paymentContext")
+    if not isinstance(config, dict):
+        return None
+
+    title = str(config.get("title") or tool.get("name") or "x402 PAYMENT").strip()
+    subject = str(config.get("subject") or "").strip()
+    subject_field = str(config.get("subjectField") or "").strip()
+    if subject_field:
+        fields = tool.get("templateFields")
+        spec = fields.get(subject_field, {}) if isinstance(fields, dict) else {}
+        subject = _paid_tool_template_value(subject_field, spec, payload, encoded=False)
+
+    if not subject:
+        return None
+
+    return {
+        "title": title,
+        "subject": f"{config.get('subjectPrefix', '')}{subject}",
+    }
+
+
+def _paid_tool_template_value(
+    name: str,
+    spec: Any,
+    payload: dict[str, Any],
+    *,
+    encoded: bool = True,
+) -> str:
+    field_spec = spec if isinstance(spec, dict) else {}
+    aliases = [name, *field_spec.get("aliases", [])]
+    value: Any = None
+    for alias in aliases:
+        if payload.get(alias) is not None:
+            value = payload.get(alias)
+            break
+
+    if value is None:
+        value = field_spec.get("default", "")
+
+    text = str(value or "").strip()
+    strip_prefix = str(field_spec.get("stripPrefix") or "")
+    if strip_prefix:
+        text = text.removeprefix(strip_prefix).strip()
+
+    transform = str(field_spec.get("transform") or "")
+    if transform == "upper":
+        text = text.upper()
+    elif transform == "lower":
+        text = text.lower()
+
+    if not text and field_spec.get("required"):
+        raise ValueError(f"{name} is required")
+
+    if not encoded:
+        return text
+
+    return quote(text, safe=str(field_spec.get("safe") or ""))
+
+
+def _buy_tool_cache_key(tool: dict[str, Any], resource_url: str) -> str:
+    return json.dumps(
+        {
+            "toolId": tool.get("id"),
+            "resourceUrl": resource_url,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+
+
+def _tool_result(
+    tool: dict[str, Any],
+    payload: dict[str, Any],
+    resource_url: str | None = None,
+) -> dict[str, Any]:
+    resolved_resource_url = resource_url or str(tool["resourceUrl"])
     result = dict(payload)
+    result["resourceUrl"] = str(result.get("resourceUrl") or resolved_resource_url)
     result["tool"] = {
         "id": tool["id"],
         "name": tool["name"],
         "kind": tool["kind"],
         "source": tool["source"],
         "description": tool["description"],
-        "resourceUrl": tool["resourceUrl"],
+        "resourceUrl": resolved_resource_url,
         "mcpStyleName": tool["mcpStyleName"],
         "inputSchema": tool["inputSchema"],
     }
@@ -1137,12 +1509,76 @@ def _tool_telegram_text(tool: dict[str, Any], result: dict[str, Any]) -> str:
             "extra": _asset_extra_for_result(result),
         }
     )
-    return (
-        f"✅ {tool['name']} unlocked. "
-        f"Paid {amount}. "
-        f"Tx {tx_url}. "
-        f"Budget left {remaining}."
-    )
+    value_summary, value_link = _tool_value_summary(tool, result)
+    if value_summary:
+        text = f"{value_summary} Paid {amount}. Tx {tx_url}. Budget left {remaining}."
+        if value_link:
+            text += f"\n{value_link}"
+        return text
+
+    return f"✅ {tool['name']} unlocked. Paid {amount}. Tx {tx_url}. Budget left {remaining}."
+
+
+def _tool_value_summary(tool: dict[str, Any], result: dict[str, Any]) -> tuple[str, str]:
+    body = _resource_body(result)
+    tool_id = str(tool.get("id") or "")
+
+    if tool_id == "otto.hyperliquid_market":
+        market = body.get("market") if isinstance(body.get("market"), dict) else {}
+        symbol = str(market.get("symbol") or "").upper()
+        price = str(market.get("currentPrice") or market.get("markPrice") or "").strip()
+        leverage = str(market.get("maxLeverage") or "").strip()
+        trading_url = str(market.get("tradingUrl") or "").strip()
+        if symbol and price:
+            parts = [f"✅ Hyperliquid {symbol} unlocked.", f"Price ${price}."]
+            if leverage:
+                parts.append(f"Max leverage {leverage}x.")
+            return " ".join(parts), trading_url
+
+    if tool_id == "otto.crypto_news":
+        data = body.get("data") if isinstance(body.get("data"), dict) else {}
+        report = str(data.get("report") or body.get("report") or "").strip()
+        if report:
+            return f"✅ Crypto News unlocked.\n{_compact_multiline(report)}", ""
+
+    if tool_id == "otto.funding_rates":
+        report = str(body.get("report") or "").strip()
+        if report:
+            return f"✅ Funding Rates unlocked.\n{_compact_multiline(report)}", ""
+
+    if tool_id == "onesource.ens":
+        input_value = str(body.get("input") or "").strip()
+        address = str(body.get("address") or body.get("primary") or body.get("name") or "").strip()
+        if input_value and address:
+            return f"✅ ENS resolved: {input_value} → {address}.", ""
+
+    if tool_id == "anchor.token_price":
+        symbol = str(body.get("symbol") or "").upper()
+        usd = body.get("usd")
+        change = body.get("usd_24h_change_pct")
+        if symbol and usd is not None:
+            summary = f"✅ {symbol} price: ${usd}."
+            if change is not None:
+                summary += f" 24h {change}%."
+            return summary, ""
+
+    return "", ""
+
+
+def _resource_body(result: dict[str, Any]) -> dict[str, Any]:
+    resource_result = result.get("resourceResult")
+    if not isinstance(resource_result, dict):
+        return {}
+    body = resource_result.get("body")
+    return body if isinstance(body, dict) else {}
+
+
+def _compact_multiline(text: str, *, max_lines: int = 6, max_chars: int = 700) -> str:
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    compact = "\n".join(lines[:max_lines])
+    if len(compact) > max_chars:
+        compact = compact[: max_chars - 1].rstrip() + "…"
+    return compact
 
 
 def _x402_telegram_text(result: dict[str, Any]) -> str:

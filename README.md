@@ -174,6 +174,44 @@ The gateway performs:
 resolve paid tool -> request local Base x402 seller -> receive 402 -> check Base USDC policy -> Firefly payment approval -> CDP Wallet x402 payment -> Coinbase facilitator settlement on Base Mainnet -> protected Sign402 report JSON
 ```
 
+The built-in Base tool catalog also includes a public X/Twitter profile lookup:
+
+```text
+buy x profile elonmusk
+```
+
+Hermes should call:
+
+```text
+POST <gateway-url>/agent/inspect-tool
+Content-Type: application/json
+
+{"tool":"x402.twitter.profile","username":"elonmusk"}
+```
+
+Then:
+
+```text
+POST <gateway-url>/agent/buy-tool
+Content-Type: application/json
+
+{"tool":"x402.twitter.profile","username":"elonmusk"}
+```
+
+This resolves to `https://x402.twit.sh/users/by/username?username=elonmusk` and currently costs `0.005 USDC`.
+
+Additional built-in Base USDC paid tools:
+
+```text
+buy crypto news
+buy hyperliquid BTC
+buy funding BTC
+buy ens vitalik.eth
+buy token price ETH
+```
+
+These map to public x402 Bazaar endpoints for Otto AI crypto news, Hyperliquid market data, cross-venue funding rates, OneSource ENS resolution, and Anchor token prices.
+
 For any external Base Mainnet x402 endpoint that charges Base USDC, Hermes can use the raw URL flow:
 
 ```text
