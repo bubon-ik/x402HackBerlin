@@ -20,6 +20,7 @@ DEFAULT_EVENT_STORE_PATH = ROOT_DIR / "demo-dashboard" / "latest-run.json"
 DEFAULT_AGENT_STATE_PATH = ROOT_DIR / "demo-dashboard" / "agent-state.json"
 DEFAULT_CDP_X402_SERVICE_DIR = ROOT_DIR / "cdp-x402-service"
 BASE_USDC_MAINNET = "0x833589fCD6eDb6E08f4c7C32D4f71b54bDa02913"
+DEFAULT_BASE_REPORT_URL = "http://127.0.0.1:4021/paid/sign402-report"
 
 for package_dir in (SIGN402_BRIDGE_DIR, PAYMENT_EXECUTOR_DIR, LIVE_DEMO_DIR, DEMO_RESOURCE_SERVER_DIR):
     package_path = str(package_dir)
@@ -53,7 +54,22 @@ PAID_TOOLS: dict[str, dict[str, Any]] = {
             "properties": {},
             "required": [],
         },
-    }
+    },
+    "base.sign402.report": {
+        "id": "base.sign402.report",
+        "name": "Base Sign402 Report",
+        "kind": "local_x402_resource",
+        "source": "sign402-cdp-x402-service",
+        "description": "Local Sign402 paid report settled through official x402 on Base Mainnet.",
+        "resourceUrl": os.getenv("SIGN402_BASE_REPORT_URL", DEFAULT_BASE_REPORT_URL),
+        "command": "buy base sign402 report",
+        "mcpStyleName": "get_sign402_report",
+        "inputSchema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
 }
 
 PAID_TOOL_ALIASES = {
@@ -61,6 +77,11 @@ PAID_TOOL_ALIASES = {
     "goplausible-weather": "goplausible.weather",
     "goplausible_weather": "goplausible.weather",
     "get_weather": "goplausible.weather",
+    "base-report": "base.sign402.report",
+    "base_report": "base.sign402.report",
+    "sign402-report": "base.sign402.report",
+    "sign402_report": "base.sign402.report",
+    "get_sign402_report": "base.sign402.report",
 }
 
 

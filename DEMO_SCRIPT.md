@@ -2,7 +2,7 @@
 
 ## Goal
 
-Show that Hermes can buy an official GoPlausible x402-protected API on Algorand from Telegram, while Firefly remains mandatory for policy approval and exact payment approval.
+Show that Hermes can buy x402 paid tools on Algorand and Base from Telegram, while Firefly remains mandatory for policy approval and exact payment approval.
 
 ## Before The Pitch
 
@@ -38,7 +38,12 @@ Use Sign402 Gateway:
 https://<gateway-tunnel>.trycloudflare.com
 
 For policy approval, call POST /approve-policy.
-For buying GoPlausible weather, call POST /agent/buy-x402 with {"url":"https://x402.goplausible.xyz/examples/weather"}.
+For listing paid tools, call GET /agent/tools.
+Before buying GoPlausible weather, call POST /agent/inspect-tool with {"tool":"goplausible.weather"}.
+For buying GoPlausible weather, call POST /agent/buy-tool with {"tool":"goplausible.weather"}.
+Before buying the Base Sign402 report, call POST /agent/inspect-tool with {"tool":"base.sign402.report"}.
+For buying the Base Sign402 report, call POST /agent/buy-tool with {"tool":"base.sign402.report"}.
+When I say "buy base sign402 report", "buy base report", or "buy sign402 report", use the Base Sign402 report tool.
 Do not build the x402 payment yourself. Do not ask for private keys. Only call the Sign402 Gateway.
 ```
 
@@ -75,6 +80,21 @@ Use the official USDC policy:
 }
 ```
 
+For the Base Mainnet demo, use this USDC policy instead:
+
+```json
+{
+  "version": "1",
+  "agentId": "hermes-demo",
+  "policyId": "policy-base-usdc-001",
+  "allowedPurpose": "x402_api_access",
+  "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bDa02913",
+  "maxBudgetAtomic": "100000",
+  "maxPerPaymentAtomic": "10000",
+  "nonce": "base-mainnet-usdc-001"
+}
+```
+
 Expected:
 
 - Firefly shows the policy hash.
@@ -92,6 +112,7 @@ buy goplausible weather
 
 Expected:
 
+- Hermes treats GoPlausible Weather as a paid tool, not a hardcoded URL.
 - Gateway requests `https://x402.goplausible.xyz/examples/weather`.
 - GoPlausible returns `402 Payment Required`.
 - Gateway checks the stored policy.
@@ -102,6 +123,25 @@ Expected:
 - GoPlausible returns protected weather JSON.
 - Hermes replies with decision, tx id, policy hash, payment hash, weather result, and remaining budget.
 - Dashboard updates automatically.
+
+For the Base Mainnet path, use this Telegram command:
+
+```text
+buy base sign402 report
+```
+
+Expected:
+
+- Hermes treats Base Sign402 Report as a paid tool, not a hardcoded URL.
+- Gateway requests `http://127.0.0.1:4021/paid/sign402-report`.
+- The local CDP x402 seller returns `402 Payment Required`.
+- Gateway checks the stored Base USDC policy.
+- Firefly shows the exact `0.01 USDC` payment approval hash.
+- User presses approve.
+- Gateway invokes the CDP x402 buyer.
+- Coinbase facilitator settles USDC on Base Mainnet.
+- The protected Sign402 report JSON is returned to Hermes.
+- Hermes replies with decision, Base tx hash, policy hash, payment hash, and remaining budget.
 
 ### 4. Point To The Audit Trail
 

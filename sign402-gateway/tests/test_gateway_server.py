@@ -391,6 +391,65 @@ class GatewayServerTests(unittest.TestCase):
         self.assertIn('"mode": "paid_tool_catalog"', response)
         self.assertIn('"id": "goplausible.weather"', response)
         self.assertIn('"mcpStyleName": "get_weather"', response)
+        self.assertIn('"id": "base.sign402.report"', response)
+        self.assertIn('"mcpStyleName": "get_sign402_report"', response)
+
+    def test_agent_inspect_base_tool_resolves_alias_and_returns_offer(self):
+        policy_hash = "c" * 64
+        DummyServer.x402_inspector.reset_mock()
+        DummyServer.x402_inspector.return_value = {
+            "ok": True,
+            "mode": "inspect_only",
+            "resourceUrl": "http://127.0.0.1:4021/paid/sign402-report",
+            "paymentRequirements": {
+                "network": "base-mainnet",
+                "amountAtomic": "10000",
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            },
+        }
+
+        with patch("sys.stderr", io.StringIO()):
+            handler = self.make_handler(
+                "/agent/inspect-tool",
+                {"tool": "sign402-report", "policyHash": policy_hash},
+            )
+
+        response = self.response_text(handler)
+
+        self.assertIn("HTTP/1.0 200 OK", response)
+        self.assertIn('"toolId": "base.sign402.report"', response)
+        self.assertIn('"command": "buy base sign402 report"', response)
+        DummyServer.x402_inspector.assert_called_once_with(
+            "http://127.0.0.1:4021/paid/sign402-report",
+            policy_hash,
+        )
+
+    def test_agent_buy_base_tool_uses_x402_buyer_and_writes_tool_event(self):
+        DummyServer.x402_buyer.reset_mock()
+        DummyServer.event_store.reset_mock()
+        DummyServer.x402_buyer.return_value = {
+            "decision": "approved_and_executed",
+            "ok": True,
+            "mode": "official_x402_base_cdp",
+            "resourceUrl": "http://127.0.0.1:4021/paid/sign402-report",
+            "txId": "0xTX",
+        }
+
+        with patch("sys.stderr", io.StringIO()):
+            handler = self.make_handler("/agent/buy-tool", {"tool": "base-report"})
+
+        response = self.response_text(handler)
+
+        self.assertIn("HTTP/1.0 200 OK", response)
+        self.assertIn('"decision": "approved_and_executed"', response)
+        self.assertIn('"toolName": "Base Sign402 Report"', response)
+        DummyServer.x402_buyer.assert_called_once_with(
+            "http://127.0.0.1:4021/paid/sign402-report"
+        )
+        DummyServer.event_store.write.assert_called_once()
+        saved_event = DummyServer.event_store.write.call_args.args[0]
+        self.assertEqual(saved_event["toolId"], "base.sign402.report")
+        self.assertEqual(saved_event["command"], "buy base sign402 report")
 
     def test_agent_inspect_tool_resolves_alias_and_returns_offer(self):
         policy_hash = "c" * 64

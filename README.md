@@ -129,6 +129,51 @@ Hash ....<last4>
 OK / CANCEL
 ```
 
+For the Base Mainnet CDP demo, approve a Base USDC policy:
+
+```json
+{
+  "version": "1",
+  "agentId": "hermes-demo",
+  "policyId": "policy-base-usdc-001",
+  "allowedPurpose": "x402_api_access",
+  "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bDa02913",
+  "maxBudgetAtomic": "100000",
+  "maxPerPaymentAtomic": "10000",
+  "nonce": "base-mainnet-usdc-001"
+}
+```
+
+Then Hermes can use the same paid-tool flow from Telegram:
+
+```text
+buy base sign402 report
+```
+
+Hermes should call:
+
+```text
+POST <gateway-url>/agent/inspect-tool
+Content-Type: application/json
+
+{"tool":"base.sign402.report"}
+```
+
+Then:
+
+```text
+POST <gateway-url>/agent/buy-tool
+Content-Type: application/json
+
+{"tool":"base.sign402.report"}
+```
+
+The gateway performs:
+
+```text
+resolve paid tool -> request local Base x402 seller -> receive 402 -> check Base USDC policy -> Firefly payment approval -> CDP Wallet x402 payment -> Coinbase facilitator settlement on Base Mainnet -> protected Sign402 report JSON
+```
+
 ## Official GoPlausible x402 Path
 
 The main hackathon demo uses the official GoPlausible/x402-v2 weather endpoint:

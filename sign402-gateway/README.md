@@ -99,7 +99,19 @@ cp .env.example .env
 npm run account
 ```
 
-Fill `.env` with local CDP secrets before running `npm run account`. Fund the printed EVM address with Base Mainnet USDC before live purchases.
+Fill `.env` with local CDP secrets before running `npm run account`. Fund the printed buyer EVM address with Base Mainnet USDC before live purchases.
+
+Run the local Base x402 seller:
+
+```bash
+npm run serve
+```
+
+Default protected resource:
+
+```text
+http://127.0.0.1:4021/paid/sign402-report
+```
 
 Approve a Base policy through `/approve-policy`:
 
@@ -118,19 +130,27 @@ Approve a Base policy through `/approve-policy`:
 }
 ```
 
-Then inspect and buy a Base x402 resource:
+Then inspect and buy the Base paid tool through the same agent-facing flow:
 
 ```bash
-curl -sS -X POST http://127.0.0.1:8099/agent/inspect-x402 \
+curl -sS -X POST http://127.0.0.1:8099/agent/inspect-tool \
   -H "Content-Type: application/json" \
-  -d '{"url":"https://example.com/paid-x402-resource"}'
+  -d '{"tool":"base.sign402.report"}'
 
-curl -sS -X POST http://127.0.0.1:8099/agent/buy-x402 \
+curl -sS -X POST http://127.0.0.1:8099/agent/buy-tool \
   -H "Content-Type: application/json" \
-  -d '{"url":"https://example.com/paid-x402-resource"}'
+  -d '{"tool":"base.sign402.report"}'
 ```
 
-The gateway still checks the stored policy and requires Firefly approval before invoking the CDP buyer.
+Aliases accepted by the gateway: `base-report`, `sign402-report`, and `get_sign402_report`.
+
+The gateway still checks the stored policy and requires Firefly approval before invoking the CDP buyer. The raw URL endpoint remains available for debugging:
+
+```bash
+curl -sS -X POST http://127.0.0.1:8099/agent/buy-x402 \
+  -H "Content-Type: application/json" \
+  -d '{"url":"http://127.0.0.1:4021/paid/sign402-report"}'
+```
 
 ## Manual Run
 
