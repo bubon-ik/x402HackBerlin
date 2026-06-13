@@ -437,6 +437,14 @@ class GatewayServerTests(unittest.TestCase):
             "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
             "network": "base-mainnet",
             "remainingBudgetAtomic": "80000",
+            "paymentRequirements": {
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+                "amountAtomic": "10000",
+                "extra": {
+                    "name": "USD Coin",
+                    "version": "2",
+                },
+            },
         }
 
         with patch("sys.stderr", io.StringIO()):

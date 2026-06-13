@@ -999,10 +999,10 @@ def _format_display_amount(requirement: dict[str, Any]) -> str:
         asset_name = str(extra.get("name", ""))
         decimals = int(str(extra.get("decimals", "0")))
 
-    if asset == "10458941" and not asset_name:
+    if asset == "10458941":
         asset_name = "USDC"
         decimals = 6
-    elif asset.lower() == BASE_USDC_MAINNET.lower() and not asset_name:
+    elif asset.lower() == BASE_USDC_MAINNET.lower():
         asset_name = "USDC"
         decimals = 6
     elif asset == "ALGO_TEST":
