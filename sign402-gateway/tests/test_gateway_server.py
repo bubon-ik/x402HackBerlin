@@ -433,16 +433,25 @@ class GatewayServerTests(unittest.TestCase):
             "mode": "official_x402_base_cdp",
             "resourceUrl": "http://127.0.0.1:4021/paid/sign402-report",
             "txId": "0xTX",
+            "amountAtomic": "10000",
+            "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            "network": "base-mainnet",
+            "remainingBudgetAtomic": "80000",
         }
 
         with patch("sys.stderr", io.StringIO()):
             handler = self.make_handler("/agent/buy-tool", {"tool": "base-report"})
 
         response = self.response_text(handler)
+        body = json.loads(response.split("\r\n\r\n", 1)[1])
 
         self.assertIn("HTTP/1.0 200 OK", response)
         self.assertIn('"decision": "approved_and_executed"', response)
         self.assertIn('"toolName": "Base Sign402 Report"', response)
+        self.assertEqual(
+            body["telegramText"],
+            "✅ Base Sign402 Report unlocked. Paid 0.01 USDC. Tx https://basescan.org/tx/0xTX. Budget left 0.08 USDC.",
+        )
         DummyServer.x402_buyer.assert_called_once_with(
             "http://127.0.0.1:4021/paid/sign402-report"
         )
@@ -450,6 +459,7 @@ class GatewayServerTests(unittest.TestCase):
         saved_event = DummyServer.event_store.write.call_args.args[0]
         self.assertEqual(saved_event["toolId"], "base.sign402.report")
         self.assertEqual(saved_event["command"], "buy base sign402 report")
+        self.assertEqual(saved_event["telegramText"], body["telegramText"])
 
     def test_agent_inspect_tool_resolves_alias_and_returns_offer(self):
         policy_hash = "c" * 64

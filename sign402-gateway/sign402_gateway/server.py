@@ -1081,7 +1081,61 @@ def _tool_result(tool: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any
     result["toolName"] = tool["name"]
     result["command"] = tool["command"]
     result["mode"] = "paid_tool_" + str(payload.get("mode", "x402"))
+    if not result.get("telegramText"):
+        telegram_text = _tool_telegram_text(tool, result)
+        if telegram_text:
+            result["telegramText"] = telegram_text
     return result
+
+
+def _tool_telegram_text(tool: dict[str, Any], result: dict[str, Any]) -> str:
+    if not result.get("ok") or not result.get("txId") or result.get("amountAtomic") is None:
+        return ""
+
+    network = str(result.get("network") or result.get("x402Network") or "")
+    tx_url = _evm_transaction_url(str(result.get("txId") or ""), network)
+    if not tx_url:
+        return ""
+
+    amount = _format_display_amount(
+        {
+            "amountAtomic": result.get("amountAtomic"),
+            "asset": result.get("asset"),
+            "extra": _asset_extra_for_result(result),
+        }
+    )
+    remaining = _format_display_amount(
+        {
+            "amountAtomic": result.get("remainingBudgetAtomic", "0"),
+            "asset": result.get("asset"),
+            "extra": _asset_extra_for_result(result),
+        }
+    )
+    return (
+        f"✅ {tool['name']} unlocked. "
+        f"Paid {amount}. "
+        f"Tx {tx_url}. "
+        f"Budget left {remaining}."
+    )
+
+
+def _asset_extra_for_result(result: dict[str, Any]) -> dict[str, Any]:
+    requirement = result.get("paymentRequirements")
+    if isinstance(requirement, dict) and isinstance(requirement.get("extra"), dict):
+        return dict(requirement["extra"])
+    return {}
+
+
+def _evm_transaction_url(tx_id: str, network: str) -> str:
+    if not tx_id:
+        return ""
+    if tx_id.startswith(("http://", "https://")):
+        return tx_id
+    if network in {"base-mainnet", "eip155:8453"}:
+        return f"https://basescan.org/tx/{tx_id}"
+    if network in {"base-sepolia", "eip155:84532"}:
+        return f"https://sepolia.basescan.org/tx/{tx_id}"
+    return ""
 
 
 def _busy_payload() -> dict[str, Any]:
