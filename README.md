@@ -174,6 +174,38 @@ The gateway performs:
 resolve paid tool -> request local Base x402 seller -> receive 402 -> check Base USDC policy -> Firefly payment approval -> CDP Wallet x402 payment -> Coinbase facilitator settlement on Base Mainnet -> protected Sign402 report JSON
 ```
 
+For any external Base Mainnet x402 endpoint that charges Base USDC, Hermes can use the raw URL flow:
+
+```text
+buy x402 https://merchant.example/paid-resource
+```
+
+Hermes should inspect first:
+
+```text
+POST <gateway-url>/agent/inspect-x402
+Content-Type: application/json
+
+{"url":"https://merchant.example/paid-resource"}
+```
+
+This returns a `quoteText` such as:
+
+```text
+Base x402 quote: 0.01 USDC on Base Mainnet.
+```
+
+Then Hermes executes:
+
+```text
+POST <gateway-url>/agent/buy-x402
+Content-Type: application/json
+
+{"url":"https://merchant.example/paid-resource"}
+```
+
+Raw URL purchases are intentionally limited to Base Mainnet USDC. Other networks or assets are rejected before Firefly approval.
+
 ## Official GoPlausible x402 Path
 
 The main hackathon demo uses the official GoPlausible/x402-v2 weather endpoint:
@@ -191,7 +223,7 @@ Content-Type: application/json
 {"url":"https://example.x402.goplausible.xyz/..."}
 ```
 
-This endpoint fetches an external `402 Payment Required` response, accepts the official Algorand x402 fields (`amount`, `payTo`, CAIP-2 `network`, numeric ASA `asset`), normalizes them into the Sign402 payment commitment shape, and returns the Firefly `paymentApprovalHash` that would be approved before payment.
+For raw URL purchases, `/agent/inspect-x402` and `/agent/buy-x402` fetch an external `402 Payment Required` response, normalize the official x402 fields, and accept only Base Mainnet USDC requirements. The response includes a compact `telegramText` receipt with a clickable Basescan transaction link after payment.
 
 For agent-facing paid tools, use:
 
@@ -208,17 +240,17 @@ Current status:
 - implemented: official GoPlausible/x402-v2 payment requirement parsing;
 - implemented: Sign402 payment hash construction from normalized official requirements;
 - implemented: official `x402-avm` `PAYMENT-SIGNATURE` payment group creation for Algorand TestNet USDC;
-- implemented: gateway endpoint `POST /agent/buy-x402` for Firefly-approved official GoPlausible purchases;
+- implemented: gateway endpoint `POST /agent/buy-x402` for Firefly-approved Base Mainnet USDC raw URL purchases;
 - implemented: paid-tool catalog, `POST /agent/inspect-tool`, and `POST /agent/buy-tool` for MCP-style agent flow;
 - tested through Hermes Telegram: GoPlausible weather API returned `200 OK` with transaction `BTVGJ3MN42KKFBUN6BV3QRDZZDO54H2OCDX5LKHRU3PFASFYW72A`.
 
-For official GoPlausible payments, approve a policy whose `asset` is `10458941` and whose budget fields are in USDC atomic units. Then Hermes calls:
+For official GoPlausible payments, use the paid-tool wrapper `goplausible.weather`; raw URL `/agent/buy-x402` is reserved for Base Mainnet USDC endpoints. For Base raw URL payments, approve a policy whose `asset` is `0x833589fCD6eDb6E08f4c7C32D4f71b54bDa02913` and whose budget fields are in USDC atomic units. Then Hermes calls:
 
 ```text
 POST <gateway-url>/agent/buy-x402
 Content-Type: application/json
 
-{"url":"https://x402.goplausible.xyz/examples/weather"}
+{"url":"https://merchant.example/paid-resource"}
 ```
 
 If an external x402 resource does not provide its own nonce or payment intent, the gateway creates a fresh local Sign402 intent for each purchase. This keeps replay protection on while still allowing repeat purchases from resources that return stable payment requirements.

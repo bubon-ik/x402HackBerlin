@@ -44,6 +44,9 @@ For buying GoPlausible weather, call POST /agent/buy-tool with {"tool":"goplausi
 Before buying the Base Sign402 report, call POST /agent/inspect-tool with {"tool":"base.sign402.report"}.
 For buying the Base Sign402 report, call POST /agent/buy-tool with {"tool":"base.sign402.report"}.
 When I say "buy base sign402 report", "buy base report", or "buy sign402 report", use the Base Sign402 report tool.
+When I say "buy x402 <url>", first call POST /agent/inspect-x402 with {"url":"<url>"}.
+If the quote is acceptable and it is Base Mainnet USDC, call POST /agent/buy-x402 with {"url":"<url>"}.
+After buying a raw x402 URL, reply using only telegramText if present.
 Do not build the x402 payment yourself. Do not ask for private keys. Only call the Sign402 Gateway.
 ```
 
@@ -142,6 +145,21 @@ Expected:
 - Coinbase facilitator settles USDC on Base Mainnet.
 - The protected Sign402 report JSON is returned to Hermes.
 - Hermes replies with decision, Base tx hash, policy hash, payment hash, and remaining budget.
+
+For a generic Base Mainnet USDC x402 endpoint, use this Telegram command:
+
+```text
+buy x402 https://merchant.example/paid-resource
+```
+
+Expected:
+
+- Hermes calls `/agent/inspect-x402` first and reads `quoteText`.
+- Gateway rejects anything that is not Base Mainnet USDC.
+- If the quote is acceptable, Hermes calls `/agent/buy-x402`.
+- Firefly shows `BASE x402 PAYMENT`, the USDC amount, and `Base Mainnet`.
+- Gateway invokes the CDP x402 buyer.
+- Hermes replies with `telegramText`, including a clickable Basescan transaction link.
 
 ### 4. Point To The Audit Trail
 

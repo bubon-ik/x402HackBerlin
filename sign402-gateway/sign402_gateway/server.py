@@ -324,6 +324,9 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
 
             policy_hash = self._policy_hash_from_payload_or_state(payload)
             result = self.server.x402_inspector(resource_url, policy_hash)
+            _validate_base_usdc_x402_requirement(result.get("paymentRequirements"))
+            result["quoteText"] = _base_x402_quote_text(result["paymentRequirements"])
+            result["nextStep"] = "If acceptable, POST /agent/buy-x402 with the same url. Firefly approval is required before payment."
             self._send_json(result)
         except Exception as exc:
             self._send_json({"ok": False, "error": str(exc)}, status=400)
@@ -339,7 +342,15 @@ class Sign402GatewayHandler(BaseHTTPRequestHandler):
             if not resource_url:
                 raise ValueError("url is required")
 
-            result = self.server.x402_buyer(resource_url)
+            result = self.server.x402_buyer(
+                resource_url,
+                requirement_validator=_validate_base_usdc_x402_requirement,
+            )
+            if not result.get("telegramText"):
+                telegram_text = _x402_telegram_text(result)
+                if telegram_text:
+                    result["telegramText"] = telegram_text
+                    self.server.event_store.write(result)
             self._send_json(result)
         except Exception as exc:
             self._send_json({"decision": "rejected", "ok": False, "error": str(exc)}, status=400)
@@ -714,7 +725,12 @@ class ExternalX402Buyer:
         self.event_store = event_store
         self.agent_state_store = agent_state_store
 
-    def __call__(self, resource_url: str) -> dict[str, Any]:
+    def __call__(
+        self,
+        resource_url: str,
+        *,
+        requirement_validator: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
         policy_state = self.agent_state_store.read_policy()
         if policy_state is None:
             raise ValueError("No Firefly-approved policy stored. Call /approve-policy first.")
@@ -727,6 +743,8 @@ class ExternalX402Buyer:
 
         raw_payment_required = fetch_x402_payment_required(resource_url)
         requirement = normalize_x402_payment_required(raw_payment_required, resource_url=resource_url)
+        if requirement_validator is not None:
+            requirement_validator(requirement)
         self.agent_state_store.validate_policy_allows(policy, policy_hash, requirement)
 
         payment_commitment = build_payment_commitment(requirement, policy_hash)
@@ -1125,6 +1143,55 @@ def _tool_telegram_text(tool: dict[str, Any], result: dict[str, Any]) -> str:
         f"Tx {tx_url}. "
         f"Budget left {remaining}."
     )
+
+
+def _x402_telegram_text(result: dict[str, Any]) -> str:
+    if not result.get("ok") or not result.get("txId") or result.get("amountAtomic") is None:
+        return ""
+
+    network = str(result.get("network") or result.get("x402Network") or "")
+    tx_url = _evm_transaction_url(str(result.get("txId") or ""), network)
+    if not tx_url:
+        return ""
+
+    amount = _format_display_amount(
+        {
+            "amountAtomic": result.get("amountAtomic"),
+            "asset": result.get("asset"),
+            "extra": _asset_extra_for_result(result),
+        }
+    )
+    remaining = _format_display_amount(
+        {
+            "amountAtomic": result.get("remainingBudgetAtomic", "0"),
+            "asset": result.get("asset"),
+            "extra": _asset_extra_for_result(result),
+        }
+    )
+    return (
+        f"✅ x402 resource unlocked. "
+        f"Paid {amount}. "
+        f"Tx {tx_url}. "
+        f"Budget left {remaining}."
+    )
+
+
+def _base_x402_quote_text(requirement: dict[str, Any]) -> str:
+    amount = _format_display_amount(requirement)
+    return f"Base x402 quote: {amount} on Base Mainnet."
+
+
+def _validate_base_usdc_x402_requirement(requirement: Any) -> None:
+    if not isinstance(requirement, dict):
+        raise ValueError("paymentRequirements must be an object")
+
+    network = str(requirement.get("network") or requirement.get("x402Network") or "")
+    if network not in {"base-mainnet", "eip155:8453"}:
+        raise ValueError("Only Base Mainnet x402 endpoints are supported for raw URL purchases.")
+
+    asset = str(requirement.get("asset") or "")
+    if asset.lower() != BASE_USDC_MAINNET.lower():
+        raise ValueError("Only Base USDC x402 endpoints are supported for raw URL purchases.")
 
 
 def _asset_extra_for_result(result: dict[str, Any]) -> dict[str, Any]:

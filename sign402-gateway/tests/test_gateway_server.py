@@ -3,7 +3,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import Mock, patch
+from unittest.mock import ANY, Mock, patch
 
 from sign402_gateway.server import AgentStateStore, ExternalX402Buyer, Sign402GatewayHandler
 
@@ -237,21 +237,22 @@ class GatewayServerTests(unittest.TestCase):
         self.assertIn('"decision": "approved_and_executed"', response)
         DummyServer.agent_buy_probe.assert_called_once_with("algorand.co")
 
-    def test_agent_inspect_x402_returns_normalized_external_requirements(self):
+    def test_agent_inspect_x402_accepts_base_usdc_requirements(self):
         policy_hash = "c" * 64
         DummyServer.x402_inspector.reset_mock()
         DummyServer.x402_inspector.return_value = {
             "ok": True,
-            "resourceUrl": "https://example.x402.goplausible.xyz/protected",
+            "resourceUrl": "https://merchant.example/paid",
             "paymentRequirements": {
-                "network": "algorand-testnet",
-                "x402Network": "algorand:SGO1GKSzyE7IEPItTxCByw9x8FmnrCDexi9/cOUJOiI=",
-                "asset": "10458941",
+                "network": "base-mainnet",
+                "x402Network": "eip155:8453",
+                "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
                 "amountAtomic": "10000",
-                "receiver": "PAYEE",
-                "resource": "https://example.x402.goplausible.xyz/protected",
+                "receiver": "0x1111111111111111111111111111111111111111",
+                "resource": "https://merchant.example/paid",
                 "paymentIntent": "intent-from-resource",
                 "purpose": "x402_api_access",
+                "extra": {"name": "USD Coin", "version": "2"},
             },
             "paymentCommitment": {
                 "paymentHash": "d" * 64,
@@ -263,7 +264,7 @@ class GatewayServerTests(unittest.TestCase):
             handler = self.make_handler(
                 "/agent/inspect-x402",
                 {
-                    "url": "https://example.x402.goplausible.xyz/protected",
+                    "url": "https://merchant.example/paid",
                     "policyHash": policy_hash,
                 },
             )
@@ -273,32 +274,77 @@ class GatewayServerTests(unittest.TestCase):
         self.assertIn("HTTP/1.0 200 OK", response)
         self.assertIn('"ok": true', response)
         self.assertIn('"amountAtomic": "10000"', response)
+        self.assertIn('"quoteText": "Base x402 quote: 0.01 USDC on Base Mainnet."', response)
         DummyServer.x402_inspector.assert_called_once_with(
-            "https://example.x402.goplausible.xyz/protected",
+            "https://merchant.example/paid",
             policy_hash,
         )
 
-    def test_agent_buy_x402_runs_official_x402_buyer(self):
+    def test_agent_inspect_x402_rejects_non_base_usdc_requirements(self):
+        policy_hash = "c" * 64
+        DummyServer.x402_inspector.reset_mock()
+        DummyServer.x402_inspector.return_value = {
+            "ok": True,
+            "resourceUrl": "https://x402.goplausible.xyz/examples/weather",
+            "paymentRequirements": {
+                "network": "algorand-testnet",
+                "asset": "10458941",
+                "amountAtomic": "10000",
+                "receiver": "PAYEE",
+                "paymentIntent": "intent-from-resource",
+                "purpose": "x402_api_access",
+            },
+        }
+
+        with patch("sys.stderr", io.StringIO()):
+            handler = self.make_handler(
+                "/agent/inspect-x402",
+                {
+                    "url": "https://x402.goplausible.xyz/examples/weather",
+                    "policyHash": policy_hash,
+                },
+            )
+
+        response = self.response_text(handler)
+
+        self.assertIn("HTTP/1.0 400 Bad Request", response)
+        self.assertIn("Only Base Mainnet x402 endpoints are supported", response)
+
+    def test_agent_buy_x402_runs_base_usdc_buyer_and_returns_telegram_text(self):
         DummyServer.x402_buyer.reset_mock()
         DummyServer.x402_buyer.return_value = {
             "decision": "approved_and_executed",
-            "resourceUrl": "https://x402.goplausible.xyz/examples/weather",
-            "txId": "TXID",
-            "result": "paid_resource_access_granted",
+            "ok": True,
+            "resourceUrl": "https://merchant.example/paid",
+            "txId": "0xTX",
+            "amountAtomic": "10000",
+            "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+            "network": "base-mainnet",
+            "remainingBudgetAtomic": "90000",
+            "result": "official_x402_resource_access_granted",
+            "paymentRequirements": {
+                "extra": {"name": "USD Coin", "version": "2"},
+            },
         }
 
         with patch("sys.stderr", io.StringIO()):
             handler = self.make_handler(
                 "/agent/buy-x402",
-                {"url": "https://x402.goplausible.xyz/examples/weather"},
+                {"url": "https://merchant.example/paid"},
             )
 
         response = self.response_text(handler)
+        body = json.loads(response.split("\r\n\r\n", 1)[1])
 
         self.assertIn("HTTP/1.0 200 OK", response)
         self.assertIn('"decision": "approved_and_executed"', response)
+        self.assertEqual(
+            body["telegramText"],
+            "✅ x402 resource unlocked. Paid 0.01 USDC. Tx https://basescan.org/tx/0xTX. Budget left 0.09 USDC.",
+        )
         DummyServer.x402_buyer.assert_called_once_with(
-            "https://x402.goplausible.xyz/examples/weather"
+            "https://merchant.example/paid",
+            requirement_validator=ANY,
         )
 
     def test_external_x402_buyer_uses_cdp_for_base_mainnet_after_firefly_approval(self):
