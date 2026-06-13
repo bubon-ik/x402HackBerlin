@@ -324,7 +324,11 @@ class GatewayServerTests(unittest.TestCase):
                     "amount": "10000",
                     "asset": "0x833589fCD6eDb6E08f4c7C32D4f71b54bDa02913",
                     "payTo": "0x1111111111111111111111111111111111111111",
-                    "extra": {"name": "USDC", "decimals": 6, "paymentIntent": "base-intent-1"},
+                    "extra": {
+                        "name": "USD Coin",
+                        "version": "2",
+                        "paymentIntent": "base-intent-1",
+                    },
                 }
             ],
         }
@@ -373,6 +377,10 @@ class GatewayServerTests(unittest.TestCase):
         self.assertEqual(result["mode"], "official_x402_base_cdp")
         self.assertEqual(result["txId"], "0xTX")
         firefly.approve_payment_hash.assert_called_once()
+        self.assertEqual(
+            firefly.approve_payment_hash.call_args.kwargs["context_lines"],
+            ["x402 PAYMENT", "0.01 USDC", "x402 API"],
+        )
         cdp_buyer.assert_called_once_with("https://api.example.com/paid-report")
         algorand_builder.assert_not_called()
         agent_state_store.record_payment.assert_called_once_with(
