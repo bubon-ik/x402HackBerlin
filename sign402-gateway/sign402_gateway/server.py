@@ -980,8 +980,16 @@ def _payment_context_lines(requirement: dict[str, Any] | None) -> list[str]:
         return ["x402 PAYMENT", "sign402 approval"]
 
     resource = str(requirement.get("resource", ""))
-    title = "x402 WEATHER" if "weather" in resource.lower() else "x402 PAYMENT"
-    service = "GoPlausible API" if "goplausible" in resource.lower() else "x402 API"
+    network = str(requirement.get("network") or requirement.get("x402Network") or "")
+    if network in {"base-mainnet", "eip155:8453"}:
+        title = "BASE x402 PAYMENT"
+        service = "Base Mainnet"
+    elif "weather" in resource.lower():
+        title = "x402 WEATHER"
+        service = "GoPlausible API"
+    else:
+        title = "x402 PAYMENT"
+        service = "x402 API"
     return [
         title,
         _format_display_amount(requirement),

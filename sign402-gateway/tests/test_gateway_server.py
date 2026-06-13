@@ -379,7 +379,7 @@ class GatewayServerTests(unittest.TestCase):
         firefly.approve_payment_hash.assert_called_once()
         self.assertEqual(
             firefly.approve_payment_hash.call_args.kwargs["context_lines"],
-            ["x402 PAYMENT", "0.01 USDC", "x402 API"],
+            ["BASE x402 PAYMENT", "0.01 USDC", "Base Mainnet"],
         )
         cdp_buyer.assert_called_once_with("https://api.example.com/paid-report")
         algorand_builder.assert_not_called()
